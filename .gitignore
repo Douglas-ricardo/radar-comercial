@@ -1,0 +1,28 @@
+# ── Ambiente — NUNCA commitar ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+Thumbs.db
+
+# ── Editores ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── v0 / vercel internals ─────────────────────────────────────────────────────
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.v0-trash/
+.vercel/
+next.user-config.*
+
+# ── Node / Next ───────────────────────────────────────────────────────────────
+node_modules/
+.next/

@@ -1,0 +1,266 @@
+# app/api/files.py
+import logging
+import os
+import uuid
+import magic
+from pathlib import Path
+
+from fastapi import APIRouter, UploadFile, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import update
+
+from app.infrastructure.database import get_db_session
+from app.domain.models import UploadedFile, AnalysisResult, Company
+from app.core.auth import get_current_user_and_company
+from app.services.plan_service import PlanService
+from app.workers.tasks import process_sales_file
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/files", tags=["Files"])
+
+# Limite de upload — protege memória/disco contra arquivos absurdamente grandes.
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _upload_mime_allowed(suffix: str, mime: str) -> bool:
+    """
+    Valida MIME em conjunto com a extensão.
+    libmagic no Windows costuma devolver text/plain para CSV — por isso
+    aceitamos ambos para CSV em vez de bloquear por MIME isolado.
+    """
+    if suffix == "csv":
+        return mime in ("text/csv", "text/plain", "application/csv")
+    if suffix == "xlsx":
+        return mime in (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/zip",
+        )
+    if suffix == "xls":
+        return mime in ("application/vnd.ms-excel", "application/octet-stream")
+    return False
+
+
+_TEMP_DIR = Path(os.getenv("TEMP_DIR", str(Path(__file__).resolve().parent.parent.parent / "temp")))
+_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    company_id = token_data.company_id
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+
+    PlanService.check_upload_limit(company)
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Nome de arquivo obrigatório.")
+    safe_filename = Path(file.filename).name
+    if not safe_filename:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido.")
+
+    suffix = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
+    if suffix not in ("csv", "xlsx", "xls"):
+        raise HTTPException(
+            status_code=400,
+            detail="Extensão não suportada. Envie um ficheiro .csv, .xlsx ou .xls.",
+        )
+
+    header = await file.read(2048)
+    await file.seek(0)
+
+    file_mime = magic.from_buffer(header, mime=True)
+    if not _upload_mime_allowed(suffix, file_mime):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato inválido para .{suffix}: {file_mime}",
+        )
+
+    file_id = str(uuid.uuid4())
+    local_file_path = str(_TEMP_DIR / f"{file_id}_{safe_filename}")
+
+    new_file = UploadedFile(
+        id=file_id,
+        company_id=company_id,
+        filename=safe_filename,
+        status="processing",
+    )
+    db.add(new_file)
+
+    # UPDATE atômico com condição — previne race condition em uploads simultâneos.
+    # Se dois requests chegarem ao mesmo tempo, apenas um consegue incrementar.
+    stmt = (
+        update(Company)
+        .where(
+            Company.id == company_id,
+            Company.uploads_used < Company.uploads_limit,
+        )
+        .values(uploads_used=Company.uploads_used + 1)
+    )
+    result = db.execute(stmt)
+    if result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=403,
+            detail="Limite de uploads atingido durante processamento simultâneo.",
+        )
+
+    db.commit()
+    db.refresh(company)
+
+    # Stream em chunks com validação de tamanho — evita carregar 500 MB na RAM.
+    chunk_size = 1024 * 1024  # 1 MB
+    total_bytes = 0
+    try:
+        with open(local_file_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_FILE_SIZE:
+                    buffer.close()
+                    if os.path.exists(local_file_path):
+                        os.remove(local_file_path)
+                    # Reverte o incremento de uploads_used e remove o registo
+                    db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
+                    db.execute(
+                        update(Company)
+                        .where(Company.id == company_id)
+                        .values(uploads_used=Company.uploads_used - 1)
+                    )
+                    db.commit()
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Arquivo muito grande. Limite: {MAX_FILE_SIZE // (1024 * 1024)} MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Falha de I/O — reverte tudo
+        if os.path.exists(local_file_path):
+            os.remove(local_file_path)
+        db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
+        db.execute(
+            update(Company)
+            .where(Company.id == company_id)
+            .values(uploads_used=Company.uploads_used - 1)
+        )
+        db.commit()
+        logger.error("file.upload.write_error", extra={"file_id": file_id, "error": str(exc)})
+        raise HTTPException(status_code=500, detail="Erro ao salvar o arquivo.")
+
+    logger.info(
+        "file.upload.queued",
+        extra={
+            "file_id": file_id,
+            "company_id": company_id,
+            "filename": safe_filename,
+            "uploads_used": company.uploads_used,
+            "uploads_limit": company.uploads_limit,
+        },
+    )
+
+    process_sales_file.delay(file_id, company_id, local_file_path)
+
+    return {
+        "success": True,
+        "data": {
+            "id": file_id,
+            "status": "processing",
+            "message": "Enviado para a fila de processamento.",
+        },
+    }
+
+
+@router.get("/{file_id}/status")
+def get_file_status(
+    file_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    file_entry = (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.id == file_id,
+            UploadedFile.company_id == token_data.company_id,
+        )
+        .first()
+    )
+
+    if not file_entry:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    return {
+        "success": True,
+        "data": {
+            "id": file_entry.id,
+            "status": file_entry.status,
+            "errorMessage": file_entry.error_message,
+        },
+    }
+
+
+@router.get("/")
+def list_files(
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    results = (
+        db.query(UploadedFile, AnalysisResult)
+        .outerjoin(AnalysisResult, AnalysisResult.file_id == UploadedFile.id)
+        .filter(UploadedFile.company_id == token_data.company_id)
+        .order_by(UploadedFile.uploaded_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": f.id,
+                "filename": f.filename,
+                "status": f.status,
+                "uploadedAt": f.uploaded_at.isoformat(),
+                "errorMessage": f.error_message,
+                "lostRevenue": analysis.lost_revenue if analysis else 0,
+                "totalRevenue": analysis.total_revenue if analysis else 0,
+                "opportunities": analysis.opportunities_count if analysis else 0,
+            }
+            for f, analysis in results
+        ],
+    }
+
+
+@router.delete("/{file_id}")
+def delete_file(
+    file_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    file_entry = (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.id == file_id,
+            UploadedFile.company_id == token_data.company_id,
+        )
+        .first()
+    )
+
+    if not file_entry:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    db.query(AnalysisResult).filter(AnalysisResult.file_id == file_id).delete()
+    db.delete(file_entry)
+    db.commit()
+
+    logger.info("file.deleted", extra={"file_id": file_id, "company_id": token_data.company_id})
+
+    return {"success": True, "message": "Arquivo removido com sucesso."}
