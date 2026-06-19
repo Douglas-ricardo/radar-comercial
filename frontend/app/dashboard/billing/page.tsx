@@ -30,7 +30,7 @@ const PLANS = [
   {
     id: 'pro' as PlanId,
     name: 'Profissional',
-    price: 'R$ 497',
+    price: 'R$ 199',
     period: '/mês',
     description: 'Para times em crescimento',
     icon: Users,
@@ -47,7 +47,7 @@ const PLANS = [
   {
     id: 'enterprise' as PlanId,
     name: 'Enterprise',
-    price: 'R$ 1.497',
+    price: 'R$ 499',
     period: '/mês',
     description: 'Para grandes operações',
     icon: Crown,
@@ -129,7 +129,7 @@ function BillingContent() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2 font-serif text-lg font-medium tracking-[-0.01em]">
                   <TrendingUp className="h-5 w-5" />
                   Seu plano atual
                 </CardTitle>
@@ -148,7 +148,7 @@ function BillingContent() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">Uploads este mês</span>
-                <span className={cn('text-sm font-semibold', isNearLimit && 'text-destructive')}>
+                <span className={cn('text-sm font-semibold tabular-nums', isNearLimit && 'text-destructive')}>
                   {company?.uploadsUsed ?? 0} / {company?.uploadsLimit ?? 0}
                 </span>
               </div>
@@ -172,7 +172,7 @@ function BillingContent() {
 
         {/* Comparativo de planos */}
         <div>
-          <h2 className="text-xl font-semibold mb-4">Planos disponíveis</h2>
+          <h2 className="font-serif text-xl font-medium tracking-[-0.01em] mb-4">Planos disponíveis</h2>
           <div className="grid gap-4 md:grid-cols-3">
             {PLANS.map((plan) => {
               const isCurrent = plan.id === currentPlan
@@ -185,7 +185,7 @@ function BillingContent() {
                   className={cn(
                     'relative flex flex-col',
                     plan.popular && 'border-primary ring-1 ring-primary/40',
-                    isCurrent && 'border-green-500/50 bg-green-50/30',
+                    isCurrent && 'border-success/50 bg-success/[0.06]',
                   )}
                 >
                   {plan.popular && !isCurrent && (
@@ -194,7 +194,7 @@ function BillingContent() {
                     </span>
                   )}
                   {isCurrent && (
-                    <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-green-600 px-3 py-0.5 text-xs font-medium text-white">
+                    <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-success px-3 py-0.5 text-xs font-medium text-success-foreground">
                       Plano atual
                     </span>
                   )}
@@ -202,9 +202,9 @@ function BillingContent() {
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
                       <plan.icon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                     </div>
-                    <CardTitle>{plan.name}</CardTitle>
+                    <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">{plan.name}</CardTitle>
                     <div>
-                      <span className="text-2xl font-bold">{plan.price}</span>
+                      <span className="font-serif text-2xl tabular-nums">{plan.price}</span>
                       <span className="text-sm text-muted-foreground">{plan.period}</span>
                     </div>
                     <CardDescription>{plan.description}</CardDescription>
@@ -213,7 +213,7 @@ function BillingContent() {
                     <ul className="space-y-2">
                       {plan.features.map((feature) => (
                         <li key={feature} className="flex items-start gap-2 text-sm">
-                          <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" aria-hidden="true" />
+                          <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" aria-hidden="true" />
                           <span>{feature}</span>
                         </li>
                       ))}

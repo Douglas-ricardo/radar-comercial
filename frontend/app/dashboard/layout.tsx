@@ -3,6 +3,7 @@
 
 import { ProtectedRoute } from '@/lib/auth/protected-route'
 import { DashboardSidebar } from '@/components/dashboard/sidebar'
+import { CommandMenu } from '@/components/dashboard/command-menu'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,6 +14,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
+      <CommandMenu />
     </ProtectedRoute>
   )
 }

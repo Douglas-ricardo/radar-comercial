@@ -9,8 +9,8 @@ function AuthIllustration() {
   return (
     <div className="relative flex h-full flex-col justify-between p-12">
       <div className="absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-20 -top-20 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute -left-20 -top-20 h-96 w-96 rounded-full bg-primary-foreground/10 blur-3xl" />
+        <div className="absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-primary-foreground/5 blur-3xl" />
       </div>
 
       <div>
@@ -19,7 +19,7 @@ function AuthIllustration() {
 
       <div className="space-y-8">
         <div>
-          <h2 className="text-3xl font-bold text-primary-foreground">
+          <h2 className="font-serif text-3xl tracking-[-0.02em] text-primary-foreground">
             Transforme dados em receita
           </h2>
           <p className="mt-3 text-lg text-primary-foreground/80">
@@ -62,15 +62,15 @@ function AuthIllustration() {
 
       <div className="grid grid-cols-3 gap-6 rounded-xl bg-primary-foreground/10 p-6">
         <div className="text-center">
-          <div className="text-2xl font-bold text-primary-foreground">R$ 2M+</div>
+          <div className="font-serif text-2xl tabular-nums text-primary-foreground">R$ 2M+</div>
           <div className="text-xs text-primary-foreground/70">Receita recuperada</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold text-primary-foreground">500+</div>
+          <div className="font-serif text-2xl tabular-nums text-primary-foreground">500+</div>
           <div className="text-xs text-primary-foreground/70">Empresas ativas</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold text-primary-foreground">98%</div>
+          <div className="font-serif text-2xl tabular-nums text-primary-foreground">98%</div>
           <div className="text-xs text-primary-foreground/70">Satisfação</div>
         </div>
       </div>
@@ -81,7 +81,7 @@ function AuthIllustration() {
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      <div className="hidden w-1/2 bg-gradient-to-br from-primary via-primary to-primary/90 lg:block">
+      <div className="hidden w-1/2 bg-primary lg:block">
         <AuthIllustration />
       </div>
 

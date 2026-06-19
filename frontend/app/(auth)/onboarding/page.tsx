@@ -219,7 +219,7 @@ export default function OnboardingPage() {
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Building2 className="h-6 w-6 text-primary" aria-hidden="true" />
             </div>
-            <CardTitle className="text-2xl">Sobre sua empresa</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Sobre sua empresa</CardTitle>
             <CardDescription>
               Conte-nos um pouco sobre sua empresa para personalizar sua experiência
             </CardDescription>
@@ -264,7 +264,7 @@ export default function OnboardingPage() {
       {step === 'industry' && (
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Setor e tamanho</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Setor e tamanho</CardTitle>
             <CardDescription>
               Isso nos ajuda a otimizar as análises para seu tipo de negócio
             </CardDescription>
@@ -334,7 +334,7 @@ export default function OnboardingPage() {
       {step === 'plan' && (
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Escolha seu plano</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Escolha seu plano</CardTitle>
             <CardDescription>Você pode alterar seu plano a qualquer momento</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -361,9 +361,9 @@ export default function OnboardingPage() {
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
                     <plan.icon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                   </div>
-                  <h3 className="font-semibold">{plan.name}</h3>
+                  <h3 className="font-serif text-base font-medium">{plan.name}</h3>
                   <div className="mt-1">
-                    <span className="text-2xl font-bold">{plan.price}</span>
+                    <span className="font-serif text-2xl tabular-nums">{plan.price}</span>
                     <span className="text-sm text-muted-foreground">{plan.period}</span>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{plan.description}</p>

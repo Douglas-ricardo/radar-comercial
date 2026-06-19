@@ -41,8 +41,8 @@ export function ConfirmState({
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-background border border-border shadow-sm mb-4">
           <FileSpreadsheet className="h-8 w-8 text-primary" aria-hidden="true" />
         </div>
-        <h3 className="text-base font-semibold text-foreground">{file.name}</h3>
-        <p className="text-sm text-muted-foreground">{fileSizeMB} MB</p>
+        <h3 className="font-serif text-lg text-foreground">{file.name}</h3>
+        <p className="text-sm text-muted-foreground tabular-nums">{fileSizeMB} MB</p>
 
         {isFailed && errorMessage && (
           <div
@@ -59,7 +59,7 @@ export function ConfirmState({
             Trocar arquivo
           </Button>
           <Button
-            className="flex-1 shadow-md hover:shadow-lg transition-all"
+            className="flex-1 transition-colors"
             onClick={onUpload}
           >
             {isFailed ? 'Tentar novamente' : 'Iniciar análise'}
@@ -99,7 +99,7 @@ export function CompletedState({ onNewUpload, onViewInsights }: CompletedStatePr
       >
         <CheckCircle2 className="h-10 w-10 text-success" />
       </div>
-      <h2 className="text-2xl font-bold tracking-tight text-foreground">
+      <h2 className="font-serif text-3xl tracking-tight text-foreground">
         Análise concluída!
       </h2>
       <p className="mt-3 max-w-md text-sm text-muted-foreground leading-relaxed">
@@ -112,7 +112,7 @@ export function CompletedState({ onNewUpload, onViewInsights }: CompletedStatePr
         </Button>
         <Button
           onClick={onViewInsights}
-          className="h-11 px-6 bg-success hover:bg-success/90 text-success-foreground shadow-md hover:shadow-lg transition-all"
+          className="h-11 px-6 bg-success hover:bg-success/90 text-success-foreground transition-colors"
         >
           Explorar insights
           <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />

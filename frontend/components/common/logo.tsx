@@ -63,7 +63,7 @@ export function Logo({ className, showText = true, size = 'md' }: LogoProps) {
         </svg>
       </div>
       {showText && (
-        <span className={cn('font-semibold text-foreground', textSizeClasses[size])}>
+        <span className={cn('font-serif font-medium tracking-[-0.01em] text-foreground', textSizeClasses[size])}>
           Radar Comercial
         </span>
       )}

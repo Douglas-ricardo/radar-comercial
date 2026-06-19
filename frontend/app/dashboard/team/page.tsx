@@ -280,7 +280,7 @@ export default function TeamPage() {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="font-serif text-3xl tabular-nums">
                 {members.filter(m => m.status === 'active').length}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -297,7 +297,7 @@ export default function TeamPage() {
               <Shield className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="font-serif text-3xl tabular-nums">
                 {members.filter(m => m.role === 'admin' && m.status === 'active').length}
               </div>
             </CardContent>
@@ -311,7 +311,7 @@ export default function TeamPage() {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="font-serif text-3xl tabular-nums">
                 {members.filter(m => m.role === 'analyst' && m.status === 'active').length}
               </div>
             </CardContent>
@@ -322,7 +322,7 @@ export default function TeamPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle>Membros da equipe</CardTitle>
+              <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Membros da equipe</CardTitle>
               <CardDescription>
                 Gerencie quem tem acesso ao Radar Comercial da sua empresa
               </CardDescription>

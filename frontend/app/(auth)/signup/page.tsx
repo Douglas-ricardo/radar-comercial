@@ -85,7 +85,7 @@ export default function SignupPage() {
   return (
     <Card className="w-full max-w-md">
       <CardHeader className="space-y-1 text-center">
-        <CardTitle className="text-2xl font-bold">Criar conta</CardTitle>
+        <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Criar conta</CardTitle>
         <CardDescription>
           Comece a descobrir oportunidades de vendas perdidas
         </CardDescription>

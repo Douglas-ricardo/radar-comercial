@@ -228,7 +228,7 @@ export default function HistoryPage() {
                       <TableCell>{getStatusBadge(file.status)}</TableCell>
                       <TableCell className="text-right">
                         {file.status === 'completed' ? (
-                          <span className="font-medium text-destructive">
+                          <span className="font-medium text-destructive tabular-nums">
                             {formatCurrency(file.lostRevenue)}
                           </span>
                         ) : (
@@ -292,13 +292,13 @@ export default function HistoryPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-lg border border-border p-4">
                     <p className="text-sm text-muted-foreground">Receita total</p>
-                    <p className="text-2xl font-bold">
+                    <p className="font-serif text-3xl tabular-nums">
                       {formatCurrency(selectedFile.totalRevenue)}
                     </p>
                   </div>
                   <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
                     <p className="text-sm text-muted-foreground">Receita perdida</p>
-                    <p className="text-2xl font-bold text-destructive">
+                    <p className="font-serif text-3xl tabular-nums text-destructive">
                       {formatCurrency(selectedFile.lostRevenue)}
                     </p>
                   </div>

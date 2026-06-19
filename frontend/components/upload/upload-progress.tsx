@@ -99,7 +99,7 @@ export function UploadProgress({
             </div>
             {status !== 'failed' && (
               <span
-                className="shrink-0 text-sm font-medium"
+                className="shrink-0 text-sm font-medium tabular-nums"
                 aria-label={`${roundedProgress}% concluído`}
               >
                 {roundedProgress}%

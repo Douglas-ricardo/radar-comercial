@@ -1,11 +1,11 @@
 // app/dashboard/clientes/[id]/page.tsx
 'use client'
 
-import { use } from 'react'
+import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, TrendingUp, TrendingDown, Minus,
-  AlertTriangle, ShoppingBag, ChevronRight,
+  AlertTriangle, ShoppingBag, ChevronRight, Sparkles,
 } from 'lucide-react'
 import {
   AreaChart, Area,
@@ -27,6 +27,9 @@ import { ErrorState }         from '@/components/insights/error-state'
 import { EmptyState }         from '@/components/insights/empty-state'
 import { ChartTooltip }       from '@/components/insights/chart-tooltip'
 import type { CustomerAlert, CustomerRFV } from '@/types/customer'
+import { opportunitiesApi } from '@/lib/api/client'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -38,40 +41,40 @@ const ALERT_TYPE_LABELS: Record<CustomerAlert['type'], string> = {
 }
 
 const CONFIDENCE_CONFIG = {
-  high:   { className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300', label: 'Alta' },
-  medium: { className: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',         label: 'Média' },
-  low:    { className: 'bg-muted text-muted-foreground',                                            label: 'Baixa' },
+  high:   { className: 'bg-success/10 text-success',     label: 'Alta' },
+  medium: { className: 'bg-warning/10 text-warning',     label: 'Média' },
+  low:    { className: 'bg-muted text-muted-foreground', label: 'Baixa' },
 } as const
 
 const RFV_SEGMENT_CONFIG: Record<CustomerRFV['segment'], { label: string; className: string; description: string }> = {
   champion: {
     label: 'Campeão',
-    className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+    className: 'bg-success/10 text-success',
     description: 'Compra com frequência, alto valor, recente.',
   },
   loyal: {
     label: 'Fiel',
-    className: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+    className: 'bg-primary/10 text-primary',
     description: 'Alta frequência e valor consistente.',
   },
   at_risk: {
     label: 'Em risco',
-    className: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+    className: 'bg-warning/10 text-warning',
     description: 'Comprou bem, mas está sumindo.',
   },
   lost: {
     label: 'Perdido',
-    className: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
+    className: 'bg-destructive/10 text-destructive',
     description: 'Sem compras há muito tempo.',
   },
   new: {
     label: 'Novo',
-    className: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
+    className: 'bg-chart-5/10 text-chart-5',
     description: 'Primeira ou segunda compra recente.',
   },
 }
 
-const RFV_SCORE_COLORS = ['#e5e7eb','#fbbf24','#f97316','#10b981','#059669']
+const RFV_SCORE_COLORS = ['var(--destructive)', 'var(--warning)', 'var(--warning)', 'var(--success)', 'var(--success)']
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
 
@@ -79,7 +82,7 @@ function SectionTitle({ icon, children }: { icon: React.ReactNode; children: Rea
   return (
     <div className="flex items-center gap-2 mb-4">
       <span className="text-muted-foreground">{icon}</span>
-      <h2 className="text-sm font-medium text-foreground">{children}</h2>
+      <h2 className="font-serif text-base font-medium text-foreground">{children}</h2>
     </div>
   )
 }
@@ -91,7 +94,7 @@ function RfvScoreDots({ score }: { score: 1|2|3|4|5 }) {
         <span
           key={i}
           className="inline-block h-2 w-2 rounded-full"
-          style={{ backgroundColor: i < score ? RFV_SCORE_COLORS[score - 1] : '#e5e7eb' }}
+          style={{ backgroundColor: i < score ? RFV_SCORE_COLORS[score - 1] : 'var(--border)' }}
         />
       ))}
     </div>
@@ -106,7 +109,7 @@ function RfvBlock({ rfv }: { rfv: CustomerRFV }) {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div>
-            <CardTitle className="text-sm font-medium">Métricas RFV</CardTitle>
+            <CardTitle className="font-serif text-base font-medium">Métricas RFV</CardTitle>
             <CardDescription className="text-xs mt-0.5">Recência · Frequência · Valor</CardDescription>
           </div>
           <Badge className={cn('text-xs font-medium border-0', segment.className)}>
@@ -171,6 +174,17 @@ export default function CustomerDetailPage({
   const router      = useRouter()
 
   const { data, isLoading, error, refetch } = useCustomerDetail(company?.id, id)
+  const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean }>({ open: false, text: '', loading: false })
+
+  async function generateMessage() {
+    setMsg({ open: true, text: '', loading: true })
+    try {
+      const res = await opportunitiesApi.generateMessage(id, id, '1m')
+      setMsg({ open: true, loading: false, text: res.success && res.data ? res.data.message : 'Erro ao gerar mensagem. Tente novamente.' })
+    } catch {
+      setMsg({ open: true, loading: false, text: 'Erro ao gerar mensagem. Tente novamente.' })
+    }
+  }
 
   if (isLoading) return <PageSkeleton />
 
@@ -185,9 +199,12 @@ export default function CustomerDetailPage({
   if (!data) return null
 
   const trendIcon =
-    data.trend === 'up'   ? <TrendingUp   className="h-4 w-4 text-emerald-500" /> :
+    data.trend === 'up'   ? <TrendingUp   className="h-4 w-4 text-success" /> :
     data.trend === 'down' ? <TrendingDown className="h-4 w-4 text-destructive" /> :
                             <Minus        className="h-4 w-4 text-muted-foreground" />
+
+  const recoverable = data.alerts.reduce((s, a) => s + a.expectedValue, 0)
+  const topAlert = [...data.alerts].sort((a, b) => b.expectedValue - a.expectedValue)[0]
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -232,11 +249,25 @@ export default function CustomerDetailPage({
       <div className="flex-1 p-6 md:p-8 max-w-[1200px] mx-auto w-full space-y-8">
 
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">{data.name}</h1>
+          <h1 className="font-serif text-2xl tracking-[-0.01em]">{data.name}</h1>
           {data.document && (
             <p className="text-sm text-muted-foreground mt-0.5">{data.document}</p>
           )}
         </div>
+
+        {/* Ação recomendada — hoisted ao topo */}
+        {topAlert && (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/20 bg-primary/[0.04] p-5">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Ação recomendada</p>
+              <p className="mt-1 font-serif text-3xl leading-none text-primary tabular-nums">{formatCurrency(recoverable)}</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">{topAlert.description}</p>
+            </div>
+            <Button onClick={generateMessage} className="gap-2 shrink-0">
+              <Sparkles className="h-4 w-4" /> Gerar mensagem
+            </Button>
+          </div>
+        )}
 
         {/* ── KPIs ──────────────────────────────────────────────────────────── */}
         <div className="grid gap-4 sm:grid-cols-3">
@@ -247,7 +278,7 @@ export default function CustomerDetailPage({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-semibold tracking-tight">{formatCurrency(data.totalRevenue)}</p>
+              <p className="font-serif text-3xl tracking-tight tabular-nums">{formatCurrency(data.totalRevenue)}</p>
               <p className="text-xs text-muted-foreground mt-1">{data.percentage}% da receita da empresa</p>
             </CardContent>
           </Card>
@@ -259,7 +290,7 @@ export default function CustomerDetailPage({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-semibold tracking-tight">{data.rfv.recency}d atrás</p>
+              <p className="font-serif text-3xl tracking-tight tabular-nums">{data.rfv.recency}d atrás</p>
               <p className="text-xs text-muted-foreground mt-1">
                 {data.rfv.recency <= 30  ? 'Ativo recentemente' :
                  data.rfv.recency <= 90  ? 'Atenção recomendada' :
@@ -275,7 +306,7 @@ export default function CustomerDetailPage({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-semibold tracking-tight">{data.rfv.frequency} compras</p>
+              <p className="font-serif text-3xl tracking-tight tabular-nums">{data.rfv.frequency} compras</p>
               <p className="text-xs text-muted-foreground mt-1">no período analisado</p>
             </CardContent>
           </Card>
@@ -287,7 +318,7 @@ export default function CustomerDetailPage({
 
           <Card className="lg:col-span-2">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Evolução de receita</CardTitle>
+              <CardTitle className="font-serif text-base font-medium">Evolução de receita</CardTitle>
               <CardDescription className="text-xs">Histórico mensal de compras</CardDescription>
             </CardHeader>
             <CardContent>
@@ -305,8 +336,8 @@ export default function CustomerDetailPage({
                     >
                       <defs>
                         <linearGradient id="gradCliente" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor="hsl(var(--chart-1))" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
+                          <stop offset="5%"  stopColor="var(--chart-1)" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
@@ -330,7 +361,7 @@ export default function CustomerDetailPage({
                       <Area
                         type="monotone"
                         dataKey="value"
-                        stroke="hsl(var(--chart-1))"
+                        stroke="var(--chart-1)"
                         fill="url(#gradCliente)"
                         strokeWidth={1.5}
                         dot={false}
@@ -373,8 +404,8 @@ export default function CustomerDetailPage({
                         </div>
                       </div>
                       <div className="text-right shrink-0 space-y-0.5">
-                        <p className="text-sm font-medium">{formatCurrency(p.totalValue)}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-sm font-medium tabular-nums">{formatCurrency(p.totalValue)}</p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
                           {p.totalQuantity} un · {p.percentage}%
                         </p>
                       </div>
@@ -414,7 +445,7 @@ export default function CustomerDetailPage({
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                      <p className="font-serif text-base text-primary tabular-nums">
                         {formatCurrency(alert.expectedValue)}
                       </p>
                       <p className="text-xs text-muted-foreground">potencial</p>
@@ -427,6 +458,24 @@ export default function CustomerDetailPage({
         )}
 
       </div>
+
+      <Dialog open={msg.open} onOpenChange={(o) => setMsg((m) => ({ ...m, open: o }))}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mensagem para WhatsApp</DialogTitle>
+            <DialogDescription>Edite se necessário antes de copiar.</DialogDescription>
+          </DialogHeader>
+          {msg.loading ? (
+            <div className="space-y-2 py-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /><Skeleton className="h-4 w-4/6" /></div>
+          ) : (
+            <Textarea className="min-h-[160px] resize-none text-sm" value={msg.text} onChange={(e) => setMsg((m) => ({ ...m, text: e.target.value }))} />
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setMsg((m) => ({ ...m, open: false }))}>Fechar</Button>
+            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text)}>Copiar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

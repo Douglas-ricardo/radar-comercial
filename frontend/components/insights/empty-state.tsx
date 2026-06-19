@@ -15,7 +15,7 @@ export function EmptyState({ title, description, action }: EmptyStateProps) {
       role="status"
       aria-label={title}
     >
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-secondary">
         <Search className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
       </div>
       <h3 className="text-sm font-medium text-foreground mb-1">{title}</h3>

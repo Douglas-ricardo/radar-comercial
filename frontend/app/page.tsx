@@ -29,7 +29,7 @@ function HeroIllustration() {
           </div>
           <Sparkles className="h-5 w-5 text-primary" />
         </div>
-        <div className="text-4xl font-bold text-destructive">R$ 521.000</div>
+        <div className="font-serif text-4xl tabular-nums text-destructive">R$ 521.000</div>
         <p className="mt-1 text-sm text-muted-foreground">em oportunidades identificadas</p>
         
         <div className="mt-6 grid grid-cols-3 gap-4">
@@ -89,39 +89,39 @@ const features = [
   {
     icon: Upload,
     title: 'Upload Simples',
-    description: 'Faca upload dos seus dados de vendas em CSV ou Excel. Nosso sistema processa automaticamente.',
+    description: 'Faça upload dos seus dados de vendas em CSV ou Excel. Nosso sistema processa automaticamente.',
   },
   {
     icon: BarChart3,
-    title: 'Analise Inteligente',
-    description: 'Algoritmos avancados identificam padroes de compra e oportunidades perdidas.',
+    title: 'Análise Inteligente',
+    description: 'Algoritmos avançados identificam padrões de compra e oportunidades perdidas.',
   },
   {
     icon: TrendingUp,
     title: 'Recupere Receita',
-    description: 'Visualize exatamente quanto dinheiro esta sendo deixado na mesa e como recupera-lo.',
+    description: 'Visualize exatamente quanto dinheiro está sendo deixado na mesa e como recuperá-lo.',
   },
   {
     icon: Users,
     title: 'Multi-tenant',
-    description: 'Convide sua equipe e gerencie permissoes. Cada empresa tem seus proprios dados isolados.',
+    description: 'Convide sua equipe e gerencie permissões. Cada empresa tem seus próprios dados isolados.',
   },
 ]
 
 const benefits = [
   'Identifique clientes que pararam de comprar',
   'Descubra produtos com potencial inexplorado',
-  'Analise padroes sazonais de vendas',
+  'Analise padrões sazonais de vendas',
   'Receba alertas de oportunidades em tempo real',
-  'Exporte relatorios profissionais em PDF',
-  'API para integracao com outros sistemas',
+  'Exporte relatórios profissionais em PDF',
+  'API para integração com outros sistemas',
 ]
 
 const stats = [
   { value: 'R$ 2M+', label: 'Receita recuperada' },
   { value: '500+', label: 'Empresas ativas' },
-  { value: '15K+', label: 'Analises realizadas' },
-  { value: '98%', label: 'Satisfacao' },
+  { value: '15K+', label: 'Análises realizadas' },
+  { value: '98%', label: 'Satisfação' },
 ]
 
 export default function HomePage() {
@@ -136,11 +136,11 @@ export default function HomePage() {
               Recursos
             </Link>
             <Link href="#pricing" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-              Precos
+              Preços
             </Link>
-            <Link href="#" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-              Documentacao
-            </Link>
+            <a href="mailto:contato@radarcomercial.com.br" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+              Contato
+            </a>
           </nav>
           <div className="flex items-center gap-4">
             <Link href="/login">
@@ -148,7 +148,7 @@ export default function HomePage() {
             </Link>
             <Link href="/signup">
               <Button>
-                Comecar gratis
+                Começar grátis
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </Link>
@@ -171,26 +171,26 @@ export default function HomePage() {
               <div className="text-center lg:text-left">
                 <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-1.5 text-sm">
                   <Sparkles className="h-4 w-4 text-primary" />
-                  <span className="text-muted-foreground">Inteligencia comercial com IA</span>
+                  <span className="text-muted-foreground">Inteligência comercial com IA</span>
                 </div>
-                <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
-                  Descubra quanto dinheiro sua empresa esta{' '}
-                  <span className="bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">deixando na mesa</span>
+                <h1 className="text-balance font-serif text-4xl tracking-[-0.02em] text-foreground sm:text-5xl lg:text-6xl">
+                  Descubra quanto dinheiro sua empresa está{' '}
+                  <span className="italic text-primary">deixando na mesa</span>
                 </h1>
                 <p className="mt-6 text-pretty text-lg leading-8 text-muted-foreground">
                   O Radar Comercial analisa seus dados de vendas e identifica oportunidades perdidas.
-                  Recupere receita, entenda padroes de compra e tome decisoes baseadas em dados.
+                  Recupere receita, entenda padrões de compra e tome decisões baseadas em dados.
                 </p>
                 <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row lg:justify-start">
                   <Link href="/signup">
                     <Button size="lg" className="h-12 w-full px-8 sm:w-auto">
-                      Comecar gratuitamente
+                      Começar gratuitamente
                       <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
                   </Link>
                   <Link href="/login">
                     <Button size="lg" variant="outline" className="h-12 w-full px-8 sm:w-auto">
-                      Ver demonstracao
+                      Ver demonstração
                     </Button>
                   </Link>
                 </div>
@@ -199,7 +199,7 @@ export default function HomePage() {
                 <div className="mt-12 grid grid-cols-2 gap-6 sm:grid-cols-4 lg:mt-16">
                   {stats.map((stat) => (
                     <div key={stat.label} className="text-center lg:text-left">
-                      <div className="text-2xl font-bold text-primary sm:text-3xl">{stat.value}</div>
+                      <div className="font-serif text-2xl text-primary tabular-nums sm:text-3xl">{stat.value}</div>
                       <div className="mt-1 text-sm text-muted-foreground">{stat.label}</div>
                     </div>
                   ))}
@@ -218,11 +218,11 @@ export default function HomePage() {
         <section id="features" className="border-t border-border bg-secondary/30 px-4 py-20 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="mx-auto max-w-2xl text-center">
-              <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Tudo que voce precisa para recuperar receita
+              <h2 className="font-serif text-3xl tracking-[-0.02em] text-foreground sm:text-4xl">
+                Tudo que você precisa para recuperar receita
               </h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Uma plataforma completa para analise de vendas e identificacao de oportunidades
+                Uma plataforma completa para análise de vendas e identificação de oportunidades
               </p>
             </div>
 
@@ -253,12 +253,12 @@ export default function HomePage() {
           <div className="mx-auto max-w-7xl">
             <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
               <div>
-                <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                <h2 className="font-serif text-3xl tracking-[-0.02em] text-foreground sm:text-4xl">
                   Transforme dados em receita
                 </h2>
                 <p className="mt-4 text-lg text-muted-foreground">
-                  Nosso algoritmo analisa seus historicos de vendas e identifica padroes que
-                  indicam oportunidades perdidas. Voce sabera exatamente quais clientes reconquistar
+                  Nosso algoritmo analisa seus históricos de vendas e identifica padrões que
+                  indicam oportunidades perdidas. Você saberá exatamente quais clientes reconquistar
                   e quais produtos promover.
                 </p>
                 <ul className="mt-8 space-y-4">
@@ -281,7 +281,7 @@ export default function HomePage() {
                       </div>
                       <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">-18%</span>
                     </div>
-                    <div className="text-4xl font-bold text-destructive">R$ 521.000</div>
+                    <div className="font-serif text-4xl tabular-nums text-destructive">R$ 521.000</div>
                     <p className="mt-2 text-sm text-muted-foreground">em oportunidades identificadas</p>
                     
                     <div className="mt-6 space-y-3">
@@ -306,7 +306,7 @@ export default function HomePage() {
                         <span className="font-medium text-success">82%</span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                        <div className="h-full w-4/5 rounded-full bg-gradient-to-r from-success to-success/70" />
+                        <div className="h-full w-4/5 rounded-full bg-success" />
                       </div>
                     </div>
                   </div>
@@ -328,7 +328,7 @@ export default function HomePage() {
         <section id="pricing" className="border-t border-border bg-secondary/30 px-4 py-20 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="mx-auto max-w-2xl text-center">
-              <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              <h2 className="font-serif text-3xl tracking-[-0.02em] text-foreground sm:text-4xl">
                 Planos para todos os tamanhos
               </h2>
               <p className="mt-4 text-lg text-muted-foreground">
@@ -343,10 +343,10 @@ export default function HomePage() {
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-secondary transition-colors group-hover:bg-secondary/80">
                     <Zap className="h-6 w-6 text-muted-foreground" />
                   </div>
-                  <h3 className="mt-4 text-xl font-semibold">Gratuito</h3>
+                  <h3 className="mt-4 font-serif text-xl font-medium tracking-[-0.01em]">Gratuito</h3>
                   <div className="mt-2">
-                    <span className="text-4xl font-bold">R$ 0</span>
-                    <span className="text-muted-foreground">/mes</span>
+                    <span className="font-serif text-4xl tabular-nums">R$ 0</span>
+                    <span className="text-muted-foreground">/mês</span>
                   </div>
                   <p className="mt-4 text-sm text-muted-foreground">
                     Perfeito para comecar a explorar
@@ -354,20 +354,20 @@ export default function HomePage() {
                   <ul className="mt-6 space-y-3 text-sm">
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>5 uploads por mes</span>
+                      <span>5 uploads por mês</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>Analise basica</span>
+                      <span>Análise básica</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>1 usuario</span>
+                      <span>1 usuário</span>
                     </li>
                   </ul>
                   <Link href="/signup" className="mt-6 block">
                     <Button variant="outline" className="w-full">
-                      Comecar gratis
+                      Começar grátis
                     </Button>
                   </Link>
                 </CardContent>
@@ -375,7 +375,7 @@ export default function HomePage() {
 
               {/* Pro Plan */}
               <Card className="group relative overflow-hidden border-primary shadow-lg shadow-primary/10 transition-all duration-300 hover:shadow-xl hover:shadow-primary/20">
-                <div className="absolute -top-px left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary to-primary/70" />
+                <div className="absolute -top-px left-0 right-0 h-1 bg-primary" />
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="rounded-full bg-primary px-4 py-1 text-xs font-semibold text-primary-foreground shadow-lg">
                     Mais popular
@@ -385,10 +385,10 @@ export default function HomePage() {
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 transition-colors group-hover:bg-primary/20">
                     <Users className="h-6 w-6 text-primary" />
                   </div>
-                  <h3 className="mt-4 text-xl font-semibold">Profissional</h3>
+                  <h3 className="mt-4 font-serif text-xl font-medium tracking-[-0.01em]">Profissional</h3>
                   <div className="mt-2">
-                    <span className="text-4xl font-bold">R$ 199</span>
-                    <span className="text-muted-foreground">/mes</span>
+                    <span className="font-serif text-4xl tabular-nums">R$ 199</span>
+                    <span className="text-muted-foreground">/mês</span>
                   </div>
                   <p className="mt-4 text-sm text-muted-foreground">
                     Para times em crescimento
@@ -396,28 +396,28 @@ export default function HomePage() {
                   <ul className="mt-6 space-y-3 text-sm">
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>50 uploads por mes</span>
+                      <span>50 uploads por mês</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>Analise avancada com IA</span>
+                      <span>Análise avançada com IA</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>Ate 10 usuarios</span>
+                      <span>Até 10 usuários</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>Suporte prioritario</span>
+                      <span>Suporte prioritário</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      <span>Exportacao PDF</span>
+                      <span>Exportação PDF</span>
                     </li>
                   </ul>
                   <Link href="/signup" className="mt-6 block">
                     <Button className="w-full shadow-lg shadow-primary/20">
-                      Comecar agora
+                      Começar agora
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
@@ -430,9 +430,9 @@ export default function HomePage() {
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
                     <Shield className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  <h3 className="mt-4 text-xl font-semibold">Enterprise</h3>
+                  <h3 className="mt-4 font-serif text-xl font-medium tracking-[-0.01em]">Enterprise</h3>
                   <div className="mt-2">
-                    <span className="text-4xl font-bold">Sob consulta</span>
+                    <span className="font-serif text-4xl">Sob consulta</span>
                   </div>
                   <p className="mt-4 text-sm text-muted-foreground">
                     Para grandes operacoes
@@ -444,7 +444,7 @@ export default function HomePage() {
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
-                      Analise customizada
+                      Análise customizada
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-success" />
@@ -473,11 +473,11 @@ export default function HomePage() {
         {/* CTA Section */}
         <section className="px-4 py-20 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-4xl text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            <h2 className="font-serif text-3xl tracking-[-0.02em] text-foreground sm:text-4xl">
               Pronto para recuperar sua receita perdida?
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              Comece gratuitamente e veja quanto dinheiro sua empresa esta deixando na mesa.
+              Comece gratuitamente e veja quanto dinheiro sua empresa está deixando na mesa.
             </p>
             <div className="mt-10 flex items-center justify-center gap-4">
               <Link href="/signup">
@@ -497,15 +497,15 @@ export default function HomePage() {
           <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
             <Logo size="sm" />
             <nav className="flex gap-6">
-              <Link href="#" className="text-sm text-muted-foreground hover:text-foreground">
+              <Link href="/termos" className="text-sm text-muted-foreground hover:text-foreground">
                 Termos de Uso
               </Link>
-              <Link href="#" className="text-sm text-muted-foreground hover:text-foreground">
+              <Link href="/privacidade" className="text-sm text-muted-foreground hover:text-foreground">
                 Privacidade
               </Link>
-              <Link href="#" className="text-sm text-muted-foreground hover:text-foreground">
+              <a href="mailto:contato@radarcomercial.com.br" className="text-sm text-muted-foreground hover:text-foreground">
                 Contato
-              </Link>
+              </a>
             </nav>
           </div>
           <p className="mt-8 text-center text-sm text-muted-foreground">

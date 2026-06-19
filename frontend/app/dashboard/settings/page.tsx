@@ -181,7 +181,7 @@ export default function SettingsPage() {
           <TabsContent value="profile">
             <Card>
               <CardHeader>
-                <CardTitle>Perfil pessoal</CardTitle>
+                <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Perfil pessoal</CardTitle>
                 <CardDescription>Como os outros membros te identificam</CardDescription>
               </CardHeader>
               <CardContent>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
 
             <Card className="mt-6">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2 font-serif text-lg font-medium tracking-[-0.01em]">
                   <Lock className="h-4 w-4" aria-hidden="true" />
                   Alterar senha
                 </CardTitle>
@@ -306,7 +306,7 @@ export default function SettingsPage() {
           <TabsContent value="company">
             <Card>
               <CardHeader>
-                <CardTitle>Dados da empresa</CardTitle>
+                <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Dados da empresa</CardTitle>
                 <CardDescription>Informações para relatórios e faturamento</CardDescription>
               </CardHeader>
               <CardContent>
@@ -356,7 +356,7 @@ export default function SettingsPage() {
           <TabsContent value="notifications">
             <Card>
               <CardHeader>
-                <CardTitle>Notificações diárias</CardTitle>
+                <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Notificações diárias</CardTitle>
                 <CardDescription>
                   Receba um resumo de oportunidades todo dia às {notifPrefs.sendHour}h (horário de Brasília)
                 </CardDescription>
@@ -471,7 +471,7 @@ export default function SettingsPage() {
           <TabsContent value="billing">
             <Card>
               <CardHeader>
-                <CardTitle>Plano e faturamento</CardTitle>
+                <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Plano e faturamento</CardTitle>
                 <CardDescription>
                   Gerencie sua assinatura e histórico de pagamentos
                 </CardDescription>

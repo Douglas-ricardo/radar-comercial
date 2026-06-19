@@ -116,9 +116,9 @@ export default function UploadPage() {
 
         <div className="grid gap-8 lg:grid-cols-3 xl:gap-10 items-start">
           {/* Coluna principal */}
-          <Card className="lg:col-span-2 shadow-sm">
+          <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle className="text-xl">
+              <CardTitle className="font-serif text-xl tracking-[-0.01em]">
                 {isCompleted ? 'Processamento concluído' : 'Área de upload'}
               </CardTitle>
               {!isCompleted && (
@@ -132,9 +132,9 @@ export default function UploadPage() {
 
           {/* Coluna lateral — documentação */}
           <aside className="space-y-6" aria-label="Instruções de upload">
-            <Card className="shadow-sm">
+            <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
+                <CardTitle className="flex items-center gap-2 font-serif text-base font-medium tracking-[-0.01em]">
                   <TableProperties className="h-5 w-5 text-primary" aria-hidden="true" />
                   Estrutura do arquivo
                 </CardTitle>
@@ -184,7 +184,7 @@ export default function UploadPage() {
               </CardFooter>
             </Card>
 
-            <div className="rounded-xl border border-warning/30 bg-warning/5 p-5 shadow-sm">
+            <div className="rounded-lg border border-warning/30 bg-warning/[0.06] p-5">
               <div className="flex gap-3">
                 <Lightbulb className="h-5 w-5 text-warning shrink-0 mt-0.5" aria-hidden="true" />
                 <div>

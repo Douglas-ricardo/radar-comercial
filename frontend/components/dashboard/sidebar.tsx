@@ -6,11 +6,10 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Logo } from '@/components/common/logo'
 import { useAuth } from '@/lib/auth/auth-context'
+import { api } from '@/lib/api/client'
 import {
   LayoutDashboard,
-  Upload,
   LineChart,
-  History,
   Users,
   Settings,
   HelpCircle,
@@ -20,9 +19,12 @@ import {
   Crown,
   Briefcase,
   Plug2,
+  Send,
+  CreditCard,
+  type LucideIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Tooltip,
   TooltipContent,
@@ -30,23 +32,41 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, badge: null },
-  { name: 'Upload', href: '/dashboard/upload', icon: Upload, badge: 'novo' },
-  { name: 'Insights', href: '/dashboard/insights', icon: LineChart, badge: null },
-  { name: 'Carteira', href: '/dashboard/carteira', icon: Briefcase, badge: null },
-  { name: 'Histórico', href: '/dashboard/history', icon: History, badge: null },
-  { name: 'Equipe', href: '/dashboard/team', icon: Users, badge: null },
-  { name: 'Integrações', href: '/dashboard/integrations', icon: Plug2, badge: null },
-  { name: 'Configurações', href: '/dashboard/settings', icon: Settings, badge: null },
-] as const
+type NavEntry = { name: string; href: string; icon: LucideIcon; badge: string | null }
 
-const secondaryNavigation = [
+// Agrupada por intenção: o loop diário (Operação) no topo; análise no meio; conta embaixo.
+const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
+  {
+    label: 'Operação',
+    items: [
+      { name: 'Visão geral', href: '/dashboard', icon: LayoutDashboard, badge: null },
+      { name: 'Carteira', href: '/dashboard/carteira', icon: Briefcase, badge: null },
+      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: 'novo' },
+    ],
+  },
+  {
+    label: 'Análise',
+    items: [
+      { name: 'Insights', href: '/dashboard/insights', icon: LineChart, badge: null },
+    ],
+  },
+  {
+    label: 'Conta',
+    items: [
+      { name: 'Equipe', href: '/dashboard/team', icon: Users, badge: null },
+      { name: 'Integrações', href: '/dashboard/integrations', icon: Plug2, badge: null },
+      { name: 'Faturamento', href: '/dashboard/billing', icon: CreditCard, badge: null },
+      { name: 'Configurações', href: '/dashboard/settings', icon: Settings, badge: null },
+    ],
+  },
+]
+
+const secondaryNavigation: { name: string; href: string; icon: LucideIcon }[] = [
   { name: 'Ajuda', href: '/dashboard/help', icon: HelpCircle },
-] as const
+]
 
 interface NavItemProps {
-  item: (typeof navigation)[number]
+  item: NavEntry
   collapsed: boolean
 }
 
@@ -61,17 +81,17 @@ function NavItem({ item, collapsed }: NavItemProps) {
       href={item.href}
       aria-current={isActive ? 'page' : undefined}
       className={cn(
-        'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+        'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
         isActive
-          ? 'bg-primary text-primary-foreground shadow-sm'
-          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          ? 'bg-accent font-semibold text-accent-foreground'
+          : 'font-medium text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
         collapsed && 'justify-center px-2'
       )}
     >
       <item.icon
         className={cn(
-          'h-5 w-5 shrink-0 transition-transform duration-200',
-          !isActive && 'group-hover:scale-110'
+          'h-[18px] w-[18px] shrink-0',
+          isActive ? 'text-primary' : 'text-muted-foreground'
         )}
         aria-hidden="true"
       />
@@ -87,7 +107,7 @@ function NavItem({ item, collapsed }: NavItemProps) {
       )}
       {isActive && (
         <span
-          className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-primary-foreground/30"
+          className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-primary"
           aria-hidden="true"
         />
       )}
@@ -116,6 +136,24 @@ function NavItem({ item, collapsed }: NavItemProps) {
 export function DashboardSidebar() {
   const { company } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
+  const [toContact, setToContact] = useState(0)
+
+  // Badge "a contatar" na Carteira — uma leitura leve por sessão de navegação
+  useEffect(() => {
+    if (!company?.id) return
+    let active = true
+    api.carteira
+      .list(company.id)
+      .then((res) => {
+        if (active && res.success && res.data) {
+          setToContact(res.data.filter((o) => o.action.status === 'to_contact').length)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [company?.id])
 
   const usagePercentage = company
     ? Math.min((company.uploadsUsed / company.uploadsLimit) * 100, 100)
@@ -152,21 +190,38 @@ export function DashboardSidebar() {
           </Button>
         </div>
 
-        {/* Navegação principal */}
-        <nav className="flex-1 space-y-1 px-2 py-4" aria-label="Menu">
-          {navigation.map((item) => (
-            <NavItem key={item.name} item={item} collapsed={collapsed} />
+        {/* Navegação principal — agrupada por intenção */}
+        <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-4" aria-label="Menu">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="space-y-1">
+              {!collapsed && (
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                  {group.label}
+                </p>
+              )}
+              {group.items.map((item) => (
+                <NavItem
+                  key={item.name}
+                  item={
+                    item.href === '/dashboard/carteira' && toContact > 0
+                      ? { ...item, badge: String(toContact) }
+                      : item
+                  }
+                  collapsed={collapsed}
+                />
+              ))}
+            </div>
           ))}
         </nav>
 
         {/* Indicador de uso — expandido */}
         {!collapsed && company && (
-          <div className="mx-3 mb-4 rounded-xl border border-sidebar-border bg-sidebar-accent/50 p-4">
+          <div className="mx-3 mb-4 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-4">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-medium text-sidebar-foreground">Uploads</span>
               <span
                 className={cn(
-                  'text-xs font-semibold',
+                  'text-xs font-semibold tabular-nums',
                   isNearLimit ? 'text-destructive' : 'text-sidebar-foreground'
                 )}
               >
@@ -184,9 +239,7 @@ export function DashboardSidebar() {
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',
-                  isNearLimit
-                    ? 'bg-gradient-to-r from-destructive to-destructive/80'
-                    : 'bg-gradient-to-r from-primary to-primary/80'
+                  isNearLimit ? 'bg-destructive' : 'bg-primary'
                 )}
                 style={{ width: `${usagePercentage}%` }}
               />
