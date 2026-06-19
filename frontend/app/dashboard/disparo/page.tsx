@@ -480,7 +480,7 @@ export default function DisparoPage() {
               </>
             )}
             {!previewLoading && !previewMsg?.message && (
-              <p className="text-sm text-amber-600 py-4">
+              <p className="text-sm text-warning py-4">
                 {previewMsg?.reason ?? 'Nenhum cliente elegível para envio agora.'}
               </p>
             )}
