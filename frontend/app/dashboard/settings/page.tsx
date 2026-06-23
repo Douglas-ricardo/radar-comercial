@@ -21,6 +21,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
 import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar, ShieldCheck, KeyRound } from 'lucide-react'
 import { SecurityTab } from '@/components/settings/security-tab'
+import { SSOTab } from '@/components/settings/sso-tab'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -292,6 +293,12 @@ export default function SettingsPage() {
               <TabsTrigger value="billing" className="gap-2">
                 <CreditCard className="h-4 w-4" aria-hidden="true" />
                 Plano
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="sso" className="gap-2">
+                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                SSO
               </TabsTrigger>
             )}
             {isAdmin && (
@@ -675,6 +682,11 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>}
+
+          {/* Aba SSO — admin only */}
+          {isAdmin && <TabsContent value="sso">
+            <SSOTab />
           </TabsContent>}
 
           {/* Aba Auditoria — admin only */}

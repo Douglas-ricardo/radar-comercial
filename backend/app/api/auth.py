@@ -23,6 +23,7 @@ from app.core.auth import get_current_user_and_company
 from app.core.clock import utcnow
 from app.core.rate_limit import limiter
 from app.core.sessions import create_session, revoke_session
+from app.core.login_session import client_ip as _client_ip, set_session_cookie as _set_session_cookie, issue_login as _issue_login
 from app.services.plan_service import PlanService
 from app.services.notification_service import NotificationService
 from app.services import audit_service
@@ -35,14 +36,6 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 _MFA_PENDING_TTL = 60 * 5  # 5 min para concluir o 2º passo do login
 _MFA_PENDING_PREFIX = "mfa_pending:"
-
-
-def _client_ip(request: Request) -> str | None:
-    """IP real do cliente, respeitando X-Forwarded-For (primeiro hop)."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else None
 
 
 def _ip_allowed(company: Company, ip: str | None) -> bool:
@@ -63,35 +56,6 @@ def _ip_allowed(company: Company, ip: str | None) -> bool:
         except ValueError:
             continue
     return False
-
-
-def _set_session_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        key="radar_session",
-        value=token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 7,  # 7 dias
-    )
-
-
-def _issue_login(request: Request, response: Response, db: Session, user: User, company: Company) -> str:
-    """Cria sessão durável, embute sid no JWT, seta o cookie e retorna o token."""
-    sid = create_session(
-        db, user_id=user.id, company_id=company.id,
-        ip=_client_ip(request), user_agent=request.headers.get("user-agent"),
-    )
-    token = create_access_token(data={
-        "sub": user.id,
-        "company_id": company.id,
-        "role": user.role,
-        "scope": user.scope,
-        "cv": user.credential_version or 0,
-        "sid": sid,
-    })
-    _set_session_cookie(response, token)
-    return token
 
 
 class LoginRequest(BaseModel):
@@ -215,6 +179,10 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email ou senha incorretos.",
         )
+
+    # Conta desativada via SCIM/IdP — bloqueia o login.
+    if user.status == "disabled":
+        raise HTTPException(status_code=403, detail="Conta desativada. Contacte o administrador.")
 
     company = db.query(Company).filter(Company.id == user.company_id).first()
     if not company:

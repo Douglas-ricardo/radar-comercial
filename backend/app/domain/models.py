@@ -28,6 +28,8 @@ class Company(Base):
     purchase_cycle_days = Column(Integer, default=90, nullable=False)
     # Lista de CIDRs permitidos para login (enterprise). Vazio = sem restrição de IP.
     ip_allowlist = Column(JSON, default=list)
+    # Slug curto e único para URLs de SSO (/sso/{slug}/...). Gerado na 1ª conexão SSO.
+    sso_slug = Column(String, nullable=True, unique=True, index=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -475,6 +477,33 @@ class WebhookDelivery(Base):
     response_code = Column(Integer, nullable=True)
     attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+
+class SSOConnection(Base):
+    """Configuração de SSO (OIDC ou SAML) por empresa. config cifrado (Fernet)."""
+    __tablename__ = "sso_connections"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    protocol = Column(String, nullable=False)        # "oidc" | "saml"
+    display_name = Column(String, nullable=True)     # ex: "Okta", "Azure AD"
+    enabled = Column(Boolean, default=True, nullable=False)
+    default_role = Column(String, default="viewer")  # papel atribuído no JIT provisioning
+    allowed_domains = Column(JSON, default=list)      # ["empresa.com"] — restringe quem entra
+    config = Column(String, nullable=False)           # JSON cifrado (Fernet): credenciais do IdP
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ScimToken(Base):
+    """Token Bearer para provisionamento SCIM 2.0 (Okta/Azure). Armazena só o hash."""
+    __tablename__ = "scim_tokens"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False, unique=True, index=True)  # SHA-256
+    created_at = Column(DateTime, default=utcnow)
+    last_used_at = Column(DateTime, nullable=True)
 
 
 class UserSession(Base):

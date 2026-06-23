@@ -505,6 +505,38 @@ export interface User {
     current: boolean
   }
 
+  // --------------- SSO & Provisionamento (SCIM) ---------------
+
+  export interface SSOConnection {
+    id: string
+    protocol: 'oidc' | 'saml'
+    displayName: string | null
+    enabled: boolean
+    defaultRole: 'admin' | 'analyst' | 'viewer'
+    allowedDomains: string[]
+    createdAt: string | null
+    loginUrl: string
+    callbackUrl: string
+    metadataUrl: string | null
+  }
+
+  export interface SSOConnectionsResult {
+    slug: string
+    connections: SSOConnection[]
+  }
+
+  export interface SSODiscovery {
+    found: boolean
+    protocol?: 'oidc' | 'saml'
+    loginUrl?: string
+    displayName?: string | null
+  }
+
+  export interface ScimTokenResult {
+    token: string
+    scimBaseUrl: string
+  }
+
   // --------------- Previsão de Receita ---------------
 
   export interface ForecastMonth {

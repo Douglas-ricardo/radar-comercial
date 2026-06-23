@@ -42,6 +42,10 @@ import type {
   MfaStatus,
   MfaSetup,
   UserSessionEntry,
+  SSOConnection,
+  SSOConnectionsResult,
+  SSODiscovery,
+  ScimTokenResult,
 } from '@/types'
 
 /** Resposta de login: ou autentica direto, ou exige 2º fator (MFA). */
@@ -742,6 +746,49 @@ export const mfaApi = {
   },
 }
 
+// --------------- SSO & SCIM ---------------
+
+export interface SSOConnectionInput {
+  protocol: 'oidc' | 'saml'
+  displayName?: string
+  defaultRole?: string
+  allowedDomains: string[]
+  issuer?: string
+  clientId?: string
+  clientSecret?: string
+  idpMetadata?: string
+}
+
+export const ssoApi = {
+  async listConnections(): Promise<ApiResponse<SSOConnectionsResult>> {
+    return fetchWithAuth('/sso/connections')
+  },
+  async createConnection(data: SSOConnectionInput): Promise<ApiResponse<SSOConnection>> {
+    return fetchWithAuth('/sso/connections', {
+      method: 'POST',
+      body: JSON.stringify({
+        protocol: data.protocol,
+        display_name: data.displayName ?? null,
+        default_role: data.defaultRole ?? 'viewer',
+        allowed_domains: data.allowedDomains,
+        issuer: data.issuer ?? null,
+        client_id: data.clientId ?? null,
+        client_secret: data.clientSecret ?? null,
+        idp_metadata: data.idpMetadata ?? null,
+      }),
+    })
+  },
+  async deleteConnection(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/sso/connections/${id}`, { method: 'DELETE' })
+  },
+  async createScimToken(): Promise<ApiResponse<ScimTokenResult>> {
+    return fetchWithAuth('/sso/scim-token', { method: 'POST' })
+  },
+  async discover(email: string): Promise<ApiResponse<SSODiscovery>> {
+    return fetchWithAuth(`/sso/discover?email=${encodeURIComponent(email)}`)
+  },
+}
+
 // --------------- Auditoria ---------------
 
 export const auditApi = {
@@ -780,6 +827,7 @@ export const api = {
   campaigns: campaignsApi,
   audit: auditApi,
   mfa: mfaApi,
+  sso: ssoApi,
 }
 
 

@@ -1,10 +1,11 @@
 //app/(auth)/login/page.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth/auth-context'
+import { api } from '@/lib/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +20,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar, ShieldCheck } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar, ShieldCheck, KeyRound } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -33,8 +34,48 @@ export default function LoginPage() {
   const [mfaToken, setMfaToken] = useState<string | null>(null)
   const [mfaCode, setMfaCode] = useState('')
 
+  // SSO
+  const [ssoLoading, setSsoLoading] = useState(false)
+
   const { login, verifyMfa } = useAuth()
   const router = useRouter()
+
+  // Mostra erro de SSO vindo do callback (?sso_error=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ssoErr = params.get('sso_error')
+    if (ssoErr) {
+      const map: Record<string, string> = {
+        forbidden: 'Acesso via SSO não autorizado para este domínio.',
+        state: 'Sessão de SSO expirada. Tente novamente.',
+        exchange: 'Falha ao autenticar com o provedor de identidade.',
+        saml: 'Falha na autenticação SAML.',
+        conn: 'Conexão SSO não encontrada.',
+      }
+      setError(map[ssoErr] ?? 'Falha no login via SSO.')
+    }
+  }, [])
+
+  const handleSso = async () => {
+    if (!email) {
+      setError('Digite seu e-mail corporativo para entrar via SSO.')
+      return
+    }
+    setError('')
+    setSsoLoading(true)
+    try {
+      const res = await api.sso.discover(email)
+      if (res.success && res.data?.found && res.data.loginUrl) {
+        window.location.href = res.data.loginUrl
+      } else {
+        setError('Nenhum login SSO configurado para este domínio. Use email e senha.')
+        setSsoLoading(false)
+      }
+    } catch {
+      setError('Não foi possível iniciar o SSO. Tente novamente.')
+      setSsoLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -257,6 +298,24 @@ export default function LoginPage() {
                   <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                 </>
               )}
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border/60" /></div>
+              <div className="relative flex justify-center text-xs uppercase tracking-wider">
+                <span className="bg-background px-2 text-muted-foreground">ou</span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full text-base font-medium"
+              onClick={handleSso}
+              disabled={ssoLoading}
+            >
+              {ssoLoading ? <Spinner className="mr-2 h-4 w-4" /> : <KeyRound className="mr-2 h-4 w-4" />}
+              Entrar com SSO
             </Button>
           </form>
         </CardContent>
