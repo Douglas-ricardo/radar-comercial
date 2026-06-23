@@ -252,9 +252,17 @@ export default function CustomerDetailPage({
 
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">{data.name}</h1>
-          {data.document && (
-            <p className="text-sm text-muted-foreground mt-0.5">{data.document}</p>
-          )}
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-0.5">
+            {data.document && (
+              <p className="text-sm text-muted-foreground">CNPJ/CPF: {data.document}</p>
+            )}
+            {data.branch && (
+              <p className="text-sm text-muted-foreground">Filial: {data.branch}</p>
+            )}
+            {data.salesperson && (
+              <p className="text-sm text-muted-foreground">Vendedor: {data.salesperson}</p>
+            )}
+          </div>
         </div>
 
         {/* Ação recomendada — hoisted ao topo */}

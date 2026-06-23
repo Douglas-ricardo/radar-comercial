@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.infrastructure.database import SessionLocal, engine, get_db_session
-from app.domain.models import Base, Company, User, CustomerProfile
+from app.domain.models import Base, Company, User, CustomerProfile, ComputedInsights
 from app.core.security import get_password_hash, create_access_token
 
 # Sessão única compartilhada por toda a sessão de testes (cabe no pool_size=1).
@@ -71,7 +71,8 @@ def _make_company_with_admin(db, name: str, plan: str = "pro", uploads_used: int
 def _cookie(user: User) -> dict:
     token = create_access_token({
         "sub": user.id, "company_id": user.company_id,
-        "role": user.role, "cv": user.credential_version or 0,
+        "role": user.role, "scope": user.scope,
+        "cv": user.credential_version or 0,
     })
     return {"radar_session": token}
 
@@ -124,6 +125,39 @@ def analyst_a(db, company_a):
     db.add(analyst)
     db.commit()
     return {"user": analyst, "cookie": _cookie(analyst), "company": company_a["company"]}
+
+
+@pytest.fixture
+def scoped_analyst_sp(db, company_a):
+    """Analista com scope=branch:SP na empresa A. Banco tem clientes SP e RJ."""
+    user = User(
+        id=str(uuid.uuid4()), name="Vendedor SP",
+        email=f"sp_{uuid.uuid4().hex[:8]}@test.com",
+        hashed_password=get_password_hash("Teste123"),
+        role="analyst", status="active", scope="branch:SP",
+        company_id=company_a["company"].id, credential_version=0,
+    )
+    db.add(user)
+    db.add(CustomerProfile(
+        company_id=company_a["company"].id,
+        customer_hash="hash_scope_sp", customer_name="Cliente SP",
+        segment="at_risk", recency_days=70, total_revenue=1000.0, branch="SP",
+    ))
+    db.add(CustomerProfile(
+        company_id=company_a["company"].id,
+        customer_hash="hash_scope_rj", customer_name="Cliente RJ",
+        segment="at_risk", recency_days=70, total_revenue=2000.0, branch="RJ",
+    ))
+    db.add(ComputedInsights(
+        company_id=company_a["company"].id,
+        date_range="1m",
+        opportunities=[
+            {"customerHash": "hash_scope_sp", "customerName": "Cliente SP", "expectedValue": 1000.0},
+            {"customerHash": "hash_scope_rj", "customerName": "Cliente RJ", "expectedValue": 2000.0},
+        ],
+    ))
+    db.commit()
+    return {"user": user, "cookie": _cookie(user), "company": company_a["company"]}
 
 
 @pytest.fixture

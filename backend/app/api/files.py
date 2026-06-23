@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["Files"])
 
-# Limite de upload — protege memória/disco contra arquivos absurdamente grandes.
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Limite de upload — configurável via MAX_UPLOAD_MB (default 500).
+# Aumentar sem redimensionar o worker pode causar OOM; veja ETL lazy em etl.py.
+_MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+MAX_FILE_SIZE = _MAX_UPLOAD_MB * 1024 * 1024
 
 
 def _upload_mime_allowed(suffix: str, mime: str) -> bool:
@@ -140,7 +142,7 @@ async def upload_file(
                     db.commit()
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Arquivo muito grande. Limite: {MAX_FILE_SIZE // (1024 * 1024)} MB.",
+                        detail=f"Arquivo muito grande. Limite: {_MAX_UPLOAD_MB} MB.",
                     )
                 buffer.write(chunk)
     except HTTPException:

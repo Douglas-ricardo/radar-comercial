@@ -79,6 +79,7 @@ def _build_auth_response(token: str, user: User, company: Company) -> dict:
             "name": user.name,
             "email": user.email,
             "role": user.role,
+            "scope": user.scope,
             "status": user.status,
             "companyId": company.id,
             "createdAt": user.created_at.isoformat() if user.created_at else None,
@@ -140,6 +141,7 @@ def signup(request: Request, data: SignupRequest, response: Response, db: Sessio
         "sub": new_user.id,
         "company_id": new_company.id,
         "role": new_user.role,
+        "scope": new_user.scope,
         "cv": new_user.credential_version or 0,
     }
     access_token = create_access_token(data=token_data)
@@ -181,6 +183,7 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
         "sub": user.id,
         "company_id": company.id,
         "role": user.role,
+        "scope": user.scope,
         "cv": user.credential_version or 0,
     }
     access_token = create_access_token(data=token_data)
@@ -260,6 +263,7 @@ def change_password(
         "sub": user.id,
         "company_id": user.company_id,
         "role": user.role,
+        "scope": user.scope,
         "cv": user.credential_version,
     })
     response.set_cookie(
@@ -402,6 +406,7 @@ def set_password(
         "sub": user.id,
         "company_id": user.company_id,
         "role": user.role,
+        "scope": user.scope,
         "cv": user.credential_version,
     })
     response.set_cookie(

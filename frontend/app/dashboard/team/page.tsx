@@ -60,6 +60,7 @@ interface DisplayMember {
   name: string
   email: string
   role: MemberRole
+  scope?: string | null
   status: MemberStatus
   joinedAt: string | null
 }
@@ -99,6 +100,7 @@ function TeamPageContent() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<MemberRole>('analyst')
+  const [inviteScope, setInviteScope] = useState('')
   const [isInviting, setIsInviting] = useState(false)
 
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false)
@@ -125,6 +127,7 @@ function TeamPageContent() {
           name: m.name || m.email || 'Usuário Convidado',
           email: m.email,
           role: m.role,
+          scope: m.scope,
           status: m.status,
           joinedAt: m.createdAt ?? null,
         }))
@@ -180,12 +183,14 @@ function TeamPageContent() {
     }
     setIsInviting(true)
     try {
-      const response = await api.team.invite(company.id, inviteEmail.trim(), inviteRole)
+      const scope = inviteScope.trim() || null
+      const response = await api.team.invite(company.id, inviteEmail.trim(), inviteRole, scope)
       if (response.success) {
         toast.success('Convite enviado com sucesso!')
         setInviteDialogOpen(false)
         setInviteEmail('')
         setInviteRole('analyst')
+        setInviteScope('')
         loadMembers()
       } else {
         toast.error(response.error ?? 'Não foi possível enviar o convite.')
@@ -409,6 +414,16 @@ function TeamPageContent() {
                           </SelectContent>
                         </Select>
                       </Field>
+                      <Field>
+                        <FieldLabel htmlFor="scope">Escopo territorial <span className="text-muted-foreground font-normal">(opcional)</span></FieldLabel>
+                        <Input
+                          id="scope"
+                          type="text"
+                          placeholder="ex: branch:SP-001"
+                          value={inviteScope}
+                          onChange={(e) => setInviteScope(e.target.value)}
+                        />
+                      </Field>
                     </FieldGroup>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
@@ -480,6 +495,11 @@ function TeamPageContent() {
                           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                             <CheckCircle className="h-3 w-3" aria-hidden="true" />
                             Membro desde {new Date(member.joinedAt).toLocaleDateString('pt-BR')}
+                          </p>
+                        )}
+                        {member.scope && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Escopo: <span className="font-mono">{member.scope}</span>
                           </p>
                         )}
                       </div>

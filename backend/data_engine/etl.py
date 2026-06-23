@@ -16,16 +16,33 @@ logger = logging.getLogger(__name__)
 
 CANONICAL_COLUMNS = {
     "data": "date", "data_venda": "date", "data da venda": "date", "date": "date",
+    "data_pedido": "date", "data_nota": "date", "emissao": "date",
     "cliente": "customer_id", "customer": "customer_id", "nome": "customer_id",
-    "comprador": "customer_id", "customer_id": "customer_id",
+    "comprador": "customer_id", "customer_id": "customer_id", "razao_social": "customer_id",
+    "razao social": "customer_id", "nome_cliente": "customer_id",
     "produto": "product_id", "product": "product_id", "item": "product_id",
-    "servico": "product_id", "product_id": "product_id",
-    "quantidade": "qty", "qty": "qty", "qtd": "qty", "quant": "qty",
+    "servico": "product_id", "product_id": "product_id", "descricao": "product_id",
+    "descricao_produto": "product_id", "sku": "product_id", "cod_produto": "product_id",
+    "quantidade": "qty", "qty": "qty", "qtd": "qty", "quant": "qty", "qtde": "qty",
     "valor": "revenue", "revenue": "revenue", "preco": "revenue", "total": "revenue",
+    "valor_total": "revenue", "receita": "revenue", "faturamento": "revenue",
+    "preco_total": "revenue", "vlr_total": "revenue",
     # Contato do cliente final (opcional) — habilita disparo WhatsApp/email
     "telefone": "phone", "celular": "phone", "whatsapp": "phone", "fone": "phone",
-    "phone": "phone", "contato": "phone",
+    "phone": "phone", "contato": "phone", "tel": "phone",
     "email": "email", "e-mail": "email", "e_mail": "email", "mail": "email",
+    # Identificador fiscal (opcional) — B2B: CNPJ/CPF do cliente
+    "cnpj": "document_id", "cpf": "document_id", "documento": "document_id",
+    "document": "document_id", "doc": "document_id", "cnpj_cpf": "document_id",
+    "nr_cnpj": "document_id", "nr_cpf": "document_id",
+    # Filial / unidade de negócio (opcional) — redes, franquias, distribuidoras
+    "filial": "branch", "unidade": "branch", "loja": "branch", "branch": "branch",
+    "store": "branch", "unidade_negocio": "branch", "cod_filial": "branch",
+    "nome_filial": "branch", "regional": "branch",
+    # Vendedor responsável (opcional) — carteiras por representante
+    "vendedor": "salesperson", "representante": "salesperson", "salesperson": "salesperson",
+    "rep": "salesperson", "consultor": "salesperson", "agente": "salesperson",
+    "nome_vendedor": "salesperson", "cod_vendedor": "salesperson",
 }
 
 DATE_RANGES = ("1m", "3m", "6m", "12m")
@@ -223,13 +240,30 @@ def _clean_numerics(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _load_and_normalize(file_path: str) -> pl.DataFrame:
-    """Loads a CSV/XLSX, normalises columns, validates required fields."""
+    """
+    Loads a CSV/XLSX, selects only canonical columns (column pushdown for CSVs),
+    normalises, validates required fields and returns an in-memory DataFrame.
+    """
     if file_path.endswith(".csv"):
-        df = pl.read_csv(file_path, try_parse_dates=True)
+        # scan_csv reads the header without loading data → build rename map cheaply.
+        lf = pl.scan_csv(file_path, try_parse_dates=False, infer_schema_length=10_000)
+        raw_cols = lf.columns  # header only — no data loaded yet
+
+        rename_map = {
+            c: CANONICAL_COLUMNS[c.lower().strip()]
+            for c in raw_cols
+            if c.lower().strip() in CANONICAL_COLUMNS
+        }
+        # Select only columns we care about (column pushdown → reads less data from disk).
+        cols_to_read = [c for c in raw_cols if c.lower().strip() in CANONICAL_COLUMNS]
+        if cols_to_read:
+            lf = lf.select(cols_to_read)
+        if rename_map:
+            lf = lf.rename(rename_map)
+        df = lf.collect()
     else:
         df = pl.read_excel(file_path)
-
-    df = normalize_columns(df)
+        df = normalize_columns(df)
 
     missing = {"date", "customer_id", "revenue"} - set(df.columns)
     if missing:
@@ -473,9 +507,32 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
 
 # ─── Customer profiles ────────────────────────────────────────────────────────
 
+def _build_extra_fields_map(df: pl.DataFrame) -> dict:
+    """
+    Builds a map customer_id → {document_id, branch, salesperson} using the
+    most recent non-null value per field per customer. O(n) single pass.
+    """
+    extra_cols = [c for c in ("document_id", "branch", "salesperson") if c in df.columns]
+    if not extra_cols:
+        return {}
+    sub = df.select(["customer_id", "date"] + extra_cols).sort("date", descending=True)
+    result: dict = {}
+    for row in sub.iter_rows(named=True):
+        cid = row["customer_id"]
+        entry = result.setdefault(cid, {k: None for k in extra_cols})
+        for col in extra_cols:
+            if entry[col] is None:
+                val = row.get(col)
+                if val is not None:
+                    s = str(val).strip()
+                    entry[col] = s or None
+    return result
+
+
 def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
     """
     Computes aggregated per-customer profiles for the entire dataset.
+    Uses batch aggregations (O(n)) instead of per-customer DataFrame filters (O(n²)).
     No individual transaction rows are stored — only metrics.
     """
     if df.is_empty():
@@ -483,10 +540,11 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
 
     display_map = _build_display_map(df)
     contact_map = _build_contact_map(df)
+    extra_map = _build_extra_fields_map(df)
     max_date = _max_date(df)
     total_company_revenue = float(df["revenue"].sum() or 0.0)
 
-    # Batch aggregation for all customers at once
+    # ── Batch aggregation for all customers ──────────────────────────────────
     customer_agg = df.group_by("customer_id").agg([
         pl.col("revenue").sum().alias("total_revenue"),
         pl.col("date").max().alias("last_purchase_date"),
@@ -517,6 +575,45 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
         .fill_null(0)
     )
 
+    # ── Pre-compute top products per customer (replaces O(n²) per-customer filter) ──
+    top_prods_agg = (
+        df.group_by(["customer_id", "product_id"])
+        .agg([
+            pl.col("revenue").sum().alias("totalValue"),
+            pl.col("qty").sum().alias("totalQuantity"),
+        ])
+        .sort(["customer_id", "totalValue"], descending=[False, True])
+    )
+    top_prods_by_customer: dict = {}
+    for row in top_prods_agg.iter_rows(named=True):
+        cid = row["customer_id"]
+        lst = top_prods_by_customer.setdefault(cid, [])
+        if len(lst) < 5:
+            lst.append({
+                "product": str(row["product_id"]),
+                "totalValue": float(row["totalValue"] or 0.0),
+                "totalQuantity": int(row["totalQuantity"] or 0),
+            })
+
+    # ── Pre-compute monthly revenue per customer ────────────────────────────
+    monthly_agg = (
+        df.with_columns([
+            pl.col("date").dt.strftime("%b %Y").alias("_month_str"),
+            pl.col("date").dt.strftime("%Y-%m").alias("_month_order"),
+        ])
+        .group_by(["customer_id", "_month_str", "_month_order"])
+        .agg(pl.col("revenue").sum().alias("value"))
+        .sort(["customer_id", "_month_order"])
+    )
+    monthly_by_customer: dict = {}
+    for row in monthly_agg.iter_rows(named=True):
+        cid = row["customer_id"]
+        monthly_by_customer.setdefault(cid, []).append({
+            "month": str(row["_month_str"]),
+            "value": float(row["value"] or 0.0),
+        })
+
+    # ── Main loop — O(customers), no per-customer DataFrame filter ───────────
     profiles = []
     for row in customer_agg.iter_rows(named=True):
         cust_name = row["customer_id"]
@@ -531,7 +628,6 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
         frequency = int(row["frequency"] or 1)
         percentage = round((total_rev / total_company_revenue) * 100, 1) if total_company_revenue > 0 else 0.0
 
-        # Intervalo médio entre compras (cadência do cliente) → churn preditivo
         span_days = (last_date - first_date).days if (last_date and first_date) else 0
         avg_interval_days = round(span_days / (frequency - 1), 1) if frequency > 1 and span_days > 0 else 0.0
         churn = assess_churn_risk(recency_days, avg_interval_days, frequency)
@@ -553,38 +649,14 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
         elif rev_curr < rev_prev * 0.9:     trend = "down"
         else:                               trend = "stable"
 
-        # Per-customer aggregations
-        df_cust = df.filter(pl.col("customer_id") == cust_name)
-
-        top_prods = (
-            df_cust.group_by("product_id").agg([
-                pl.col("revenue").sum().alias("totalValue"),
-                pl.col("qty").sum().alias("totalQuantity"),
-            ])
-            .sort("totalValue", descending=True).head(5)
-        )
+        # Top products (pre-computed, no per-customer filter)
+        raw_prods = top_prods_by_customer.get(cust_name, [])
         top_products = [
-            {
-                "product": str(r["product_id"]),
-                "totalValue": float(r["totalValue"] or 0.0),
-                "totalQuantity": int(r["totalQuantity"] or 0),
-                "percentage": round((float(r["totalValue"] or 0.0) / total_rev) * 100, 1) if total_rev > 0 else 0.0,
-            }
-            for r in top_prods.iter_rows(named=True)
+            {**p, "percentage": round((p["totalValue"] / total_rev) * 100, 1) if total_rev > 0 else 0.0}
+            for p in raw_prods
         ]
 
-        df_months = df_cust.with_columns(pl.col("date").dt.strftime("%b %Y").alias("month"))
-        rev_hist = (
-            df_months.group_by("month").agg([
-                pl.col("date").min().alias("month_order"),
-                pl.col("revenue").sum().alias("value"),
-            ])
-            .sort("month_order")
-        )
-        monthly_revenue = [
-            {"month": str(r["month"]), "value": float(r["value"] or 0.0)}
-            for r in rev_hist.iter_rows(named=True)
-        ]
+        monthly_revenue = monthly_by_customer.get(cust_name, [])
 
         alerts = []
         if segment == "at_risk":
@@ -605,11 +677,15 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
             })
 
         contact = contact_map.get(cust_name, {})
+        extra = extra_map.get(cust_name, {})
         profiles.append({
             "customer_hash": customer_hash,
             "customer_name": display_map.get(cust_name, cust_name),
             "phone": contact.get("phone"),
             "email": contact.get("email"),
+            "document_id": extra.get("document_id"),
+            "branch": extra.get("branch"),
+            "salesperson": extra.get("salesperson"),
             "total_revenue": total_rev,
             "percentage": percentage,
             "last_purchase_date": last_date.isoformat() if last_date else None,

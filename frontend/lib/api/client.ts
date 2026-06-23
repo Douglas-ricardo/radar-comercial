@@ -290,21 +290,23 @@ export const teamApi = {
   async invite(
     companyId: string,
     email: string,
-    role: TeamMember['role']
+    role: TeamMember['role'],
+    scope?: string | null
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/${companyId}/invite`, {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email, role, scope: scope ?? null }),
     })
   },
 
   async updateRole(
     memberId: string,
-    role: TeamMember['role']
+    role: TeamMember['role'],
+    scope?: string | null
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/members/${memberId}/role`, {
       method: 'PATCH',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ role, ...(scope !== undefined ? { scope } : {}) }),
     })
   },
 
@@ -416,9 +418,15 @@ export const notificationsApi = {
 export const carteiraApi = {
   async list(
     companyId: string,
-    status?: OpportunityStatus
+    status?: OpportunityStatus,
+    branch?: string,
+    salesperson?: string
   ): Promise<ApiResponse<CarteiraOpportunity[]>> {
-    const q = status ? `?status=${status}` : ''
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (branch) params.set('branch', branch)
+    if (salesperson) params.set('salesperson', salesperson)
+    const q = params.size ? `?${params.toString()}` : ''
     return fetchWithAuth(`/carteira/${companyId}${q}`)
   },
 

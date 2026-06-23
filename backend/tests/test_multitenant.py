@@ -76,6 +76,26 @@ def test_outreach_update_contato_cross_tenant_404(client, company_a, company_b):
     assert r.status_code == 404
 
 
+def test_scope_branch_filtra_carteira(client, scoped_analyst_sp):
+    """Usuário com scope=branch:SP só vê clientes do branch SP, não RJ."""
+    company_id = scoped_analyst_sp["company"].id
+    r = client.get(f"/api/carteira/{company_id}", cookies=scoped_analyst_sp["cookie"])
+    assert r.status_code == 200
+    hashes = {opp["customerHash"] for opp in r.json()["data"]}
+    assert "hash_scope_sp" in hashes
+    assert "hash_scope_rj" not in hashes
+
+
+def test_scope_admin_ve_todos_os_branches(client, scoped_analyst_sp, company_a):
+    """Admin sem scope vê todos os clientes independente de filial."""
+    company_id = scoped_analyst_sp["company"].id
+    r = client.get(f"/api/carteira/{company_id}", cookies=company_a["cookie"])
+    assert r.status_code == 200
+    hashes = {opp["customerHash"] for opp in r.json()["data"]}
+    assert "hash_scope_sp" in hashes
+    assert "hash_scope_rj" in hashes
+
+
 def test_outreach_config_isolada_por_empresa(client, company_a, company_b):
     """Cada empresa tem sua própria OutreachConfig (criada sob demanda)."""
     ra = client.get("/api/outreach/config", cookies=company_a["cookie"])

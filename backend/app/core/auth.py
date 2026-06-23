@@ -31,6 +31,7 @@ class TokenData(BaseModel):
     user_id: str
     company_id: str
     role: str
+    scope: str | None = None  # "branch:SP-001" → filtra carteira/clientes; None = sem restrição
 
 async def get_current_user_and_company(
     request: Request,
@@ -54,6 +55,7 @@ async def get_current_user_and_company(
         user_id: str = payload.get("sub")
         company_id: str = payload.get("company_id")
         role: str = payload.get("role", "viewer")
+        scope: str | None = payload.get("scope")
         token_cv: int = payload.get("cv", 0)
 
         # 🔴 CORREÇÃO: Validar se os dados vitais estão lá
@@ -68,7 +70,7 @@ async def get_current_user_and_company(
             logger.info("auth.token.revoked", extra={"user_id": user_id})
             raise credentials_exception
 
-        return TokenData(user_id=user_id, company_id=company_id, role=role)
+        return TokenData(user_id=user_id, company_id=company_id, role=role, scope=scope)
 
     except jwt.ExpiredSignatureError:
         logger.info("auth.token.expired")

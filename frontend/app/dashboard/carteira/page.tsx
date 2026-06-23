@@ -19,7 +19,8 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Briefcase, Medal, DollarSign, ArrowRight } from 'lucide-react'
+import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import { api, opportunitiesApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -142,6 +143,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
 export default function CarteiraPage() {
   const { company, user } = useAuth()
   const canUseAI = user?.role === 'admin' || user?.role === 'analyst'
+  const isAdmin = user?.role === 'admin'
   const [opportunities, setOpportunities] = useState<CarteiraOpportunity[]>([])
   const [ranking, setRanking] = useState<RankingEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -149,6 +151,11 @@ export default function CarteiraPage() {
   const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
     open: false, text: '', loading: false,
   })
+  // Filtros de segmentação (só admin vê o filtro de filial/vendedor)
+  const [filterBranch, setFilterBranch] = useState('')
+  const [filterSalesperson, setFilterSalesperson] = useState('')
+  const [appliedBranch, setAppliedBranch] = useState('')
+  const [appliedSalesperson, setAppliedSalesperson] = useState('')
 
   async function handleGenerateMessage(opp: CarteiraOpportunity) {
     setMsgModal({ open: true, text: '', loading: true })
@@ -164,11 +171,11 @@ export default function CarteiraPage() {
     }
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (branch?: string, salesperson?: string) => {
     if (!company?.id) return
     setIsLoading(true)
     const [oppsRes, rankRes] = await Promise.all([
-      api.carteira.list(company.id),
+      api.carteira.list(company.id, undefined, branch || undefined, salesperson || undefined),
       api.carteira.getRanking(company.id),
     ])
     if (oppsRes.success && oppsRes.data) setOpportunities(oppsRes.data)
@@ -177,6 +184,22 @@ export default function CarteiraPage() {
   }, [company?.id])
 
   useEffect(() => { load() }, [load])
+
+  const applyFilters = () => {
+    setAppliedBranch(filterBranch)
+    setAppliedSalesperson(filterSalesperson)
+    load(filterBranch, filterSalesperson)
+  }
+
+  const clearFilters = () => {
+    setFilterBranch('')
+    setFilterSalesperson('')
+    setAppliedBranch('')
+    setAppliedSalesperson('')
+    load()
+  }
+
+  const hasActiveFilters = appliedBranch || appliedSalesperson
 
   const byStatus: Record<OpportunityStatus, CarteiraOpportunity[]> = {
     to_contact: opportunities.filter((o) => o.action.status === 'to_contact'),
@@ -199,6 +222,42 @@ export default function CarteiraPage() {
         description="Gerencie o status comercial das oportunidades identificadas"
       />
       <div className="flex-1 p-6 lg:p-8 space-y-6">
+
+        {/* Filtros de segmentação — só admins veem (analistas têm scope automático) */}
+        {isAdmin && (
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
+            <Filter className="h-4 w-4 text-muted-foreground mt-1 shrink-0" />
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Filial</label>
+              <Input
+                className="h-8 w-36 text-sm"
+                placeholder="ex: SP-001"
+                value={filterBranch}
+                onChange={(e) => setFilterBranch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Vendedor</label>
+              <Input
+                className="h-8 w-36 text-sm"
+                placeholder="nome ou código"
+                value={filterSalesperson}
+                onChange={(e) => setFilterSalesperson(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+              />
+            </div>
+            <Button size="sm" variant="outline" className="h-8" onClick={applyFilters}>
+              Filtrar
+            </Button>
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5 mr-1" />
+                Limpar
+              </Button>
+            )}
+          </div>
+        )}
 
         <Tabs defaultValue="oportunidades">
           <TabsList>

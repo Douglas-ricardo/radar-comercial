@@ -14,14 +14,9 @@ from data_engine.etl import process_sales_pipeline
 
 logger = logging.getLogger(__name__)
 
-# Lock de ETL: evita race entre uploads concorrentes da mesma empresa no
-# delete + bulk_save de CustomerProfile. O ETL roda em memória e leva
-# segundos mesmo para arquivos grandes; o TTL é folgado (10x o esperado),
-# mas curto o suficiente para que um worker que morra segurando o lock
-# o libere rápido em vez de travar uploads por minutos.
-_ETL_LOCK_TTL = 120  # 2 minutos — janela de auto-recuperação
-# Não bloqueamos o thread do worker esperando o lock: se outra task da
-# mesma empresa está processando, re-enfileiramos via Celery (countdown).
+# Lock de ETL: evita race entre uploads concorrentes da mesma empresa.
+# TTL aumentado para suportar arquivos grandes (até 500 MB).
+_ETL_LOCK_TTL = int(os.getenv("ETL_LOCK_TTL", "1800"))  # 30 min (env-override)
 _ETL_LOCK_WAIT = 5
 
 # Opt-in: retém o arquivo de origem após o ETL para permitir reprocessamento.
@@ -29,7 +24,7 @@ _ETL_LOCK_WAIT = 5
 _RETAIN_SOURCE = os.getenv("RETAIN_SOURCE_FILES", "false").lower() == "true"
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=1500, time_limit=1800)
 def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
     """
     file_ref pode ser um path local (fallback) ou "r2://<key>" (object storage).
@@ -103,6 +98,9 @@ def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
                 phone=p.get("phone") or old_phone,
                 email=p.get("email") or old_email,
                 contact_opt_out=bool(old_opt_out) or (p["customer_hash"] in opted_out),
+                document_id=p.get("document_id"),
+                branch=p.get("branch"),
+                salesperson=p.get("salesperson"),
                 total_revenue=p["total_revenue"],
                 percentage=p["percentage"],
                 last_purchase_date=p["last_purchase_date"],

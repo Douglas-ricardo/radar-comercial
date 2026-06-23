@@ -33,7 +33,9 @@ def get_customer(
         "data": {
             "id": profile.customer_hash,
             "name": profile.customer_name,
-            "document": None,
+            "document": profile.document_id,
+            "branch": profile.branch,
+            "salesperson": profile.salesperson,
             "totalRevenue": profile.total_revenue,
             "percentage": profile.percentage,
             "trend": profile.trend,

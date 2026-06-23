@@ -10,6 +10,8 @@ export interface User {
     email: string
     name: string
     role: 'admin' | 'analyst' | 'viewer'
+    /** Escopo territorial: "branch:SP-001" ou null (sem restrição). */
+    scope?: string | null
     status?: 'pending' | 'active'
     companyId: string
     createdAt: string
@@ -99,6 +101,10 @@ export interface User {
     expectedValue: number
     confidence: 'high' | 'medium' | 'low'
     description?: string
+    /** Filial/unidade extraída do CSV (opcional). */
+    branch?: string | null
+    /** Vendedor responsável extraído do CSV (opcional). */
+    salesperson?: string | null
   }
   
   export interface CustomerRow {
@@ -174,7 +180,10 @@ export interface User {
   export interface CustomerDetail {
     id: string
     name: string
+    /** CNPJ/CPF sem formatação, extraído do CSV (opcional). */
     document: string | null
+    branch?: string | null
+    salesperson?: string | null
     totalRevenue: number
     percentage: number
     trend: 'up' | 'down' | 'stable'
@@ -191,6 +200,7 @@ export interface User {
     email: string
     name: string
     role: 'admin' | 'analyst' | 'viewer'
+    scope?: string | null
     status: 'pending' | 'active'
     createdAt?: string | null
   }

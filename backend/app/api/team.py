@@ -31,6 +31,7 @@ TeamRole = Literal["admin", "analyst", "viewer"]
 class InviteRequest(BaseModel):
     email: str
     role: TeamRole
+    scope: str | None = None  # ex: "branch:SP-001"; None = sem restrição territorial
 
     @field_validator("email")
     @classmethod
@@ -43,6 +44,7 @@ class InviteRequest(BaseModel):
 
 class UpdateRoleRequest(BaseModel):
     role: TeamRole
+    scope: str | None = None  # opcional — atualiza scope junto com role
 
 
 @router.get("/{company_id}")
@@ -68,6 +70,7 @@ def list_team_members(
                 "email": u.email,
                 "name": u.name,
                 "role": u.role,
+                "scope": u.scope,
                 "status": u.status,
                 "createdAt": u.created_at.isoformat() if u.created_at else None,
             }
@@ -107,6 +110,7 @@ def invite_member(
         name="Utilizador Convidado",
         hashed_password=hashed_password,
         role=data.role,
+        scope=data.scope,
         status="pending",
         company_id=company_id,
     )
@@ -184,6 +188,8 @@ def update_member_role(
         )
 
     user_to_update.role = data.role
+    if "scope" in data.model_fields_set:
+        user_to_update.scope = data.scope
     db.commit()
 
     logger.info("team.member.role_updated", extra={"user_id": user_id, "role": data.role})
@@ -195,6 +201,7 @@ def update_member_role(
             "email": user_to_update.email,
             "name": user_to_update.name,
             "role": user_to_update.role,
+            "scope": user_to_update.scope,
             "status": user_to_update.status,
         },
     }

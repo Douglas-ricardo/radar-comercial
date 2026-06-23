@@ -38,6 +38,9 @@ class User(Base):
     company_id = Column(String, ForeignKey("companies.id"), index=True)
     # Incrementado em troca/reset de senha → invalida JWTs emitidos antes.
     credential_version = Column(Integer, default=0, nullable=False)
+    # Escopo territorial opcional: "branch:SP-001" filtra visibilidade de carteira/clientes.
+    # None = sem restrição (admin vê tudo); preenchido pelo admin no convite.
+    scope = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -116,6 +119,10 @@ class CustomerProfile(Base):
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     contact_opt_out = Column(Boolean, default=False, nullable=False)  # excluído do auto-envio
+    # Campos opcionais de segmentação — extraídos do CSV quando presentes.
+    document_id = Column(String, nullable=True)   # CNPJ/CPF sem formatação
+    branch = Column(String, nullable=True)         # filial/unidade/loja do CSV
+    salesperson = Column(String, nullable=True)    # vendedor responsável do CSV
     total_revenue = Column(Float, default=0.0)
     percentage = Column(Float, default=0.0)
     last_purchase_date = Column(String, nullable=True)
