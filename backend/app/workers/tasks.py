@@ -2,23 +2,48 @@
 import logging
 import os
 from datetime import datetime
+from app.core.clock import utcnow
 
 from app.core.celery_app import celery_app
 from app.infrastructure.database import SessionLocal
 from app.infrastructure.redis_client import redis_client
-from app.domain.models import UploadedFile, AnalysisResult, ComputedInsights, CustomerProfile
+from app.infrastructure import storage
+from app.domain.models import UploadedFile, AnalysisResult, ComputedInsights, CustomerProfile, Company, ContactOptOut
+from sqlalchemy import update
 from data_engine.etl import process_sales_pipeline
 
 logger = logging.getLogger(__name__)
 
+# Lock de ETL: evita race entre uploads concorrentes da mesma empresa.
+# TTL aumentado para suportar arquivos grandes (até 500 MB).
+_ETL_LOCK_TTL = int(os.getenv("ETL_LOCK_TTL", "1800"))  # 30 min (env-override)
+_ETL_LOCK_WAIT = 5
 
-@celery_app.task(bind=True, max_retries=3)
-def process_sales_file(self, file_id: str, company_id: str, local_file_path: str):
+# Opt-in: retém o arquivo de origem após o ETL para permitir reprocessamento.
+# Padrão FALSE = não reter transação bruta (decisão LGPD). Ligar conscientemente.
+_RETAIN_SOURCE = os.getenv("RETAIN_SOURCE_FILES", "false").lower() == "true"
+
+
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=1500, time_limit=1800)
+def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
+    """
+    file_ref pode ser um path local (fallback) ou "r2://<key>" (object storage).
+    O worker baixa para um path local antes de processar e limpa ao final.
+    """
     logger.info("worker.task.start", extra={"file_id": file_id, "company_id": company_id})
+
+    lock = redis_client.lock(f"etl_lock:{company_id}", timeout=_ETL_LOCK_TTL, blocking_timeout=_ETL_LOCK_WAIT)
+    if not lock.acquire():
+        # Outro upload da mesma empresa está em processamento — re-enfileira.
+        logger.info("worker.task.lock_busy", extra={"file_id": file_id, "company_id": company_id})
+        raise self.retry(countdown=30)
 
     db = SessionLocal()
     should_delete_file = True  # default: deleta após processar
+    local_file_path = None
     try:
+        # fetch dentro do try: se falhar, o finally ainda libera lock e fecha a sessão
+        local_file_path = storage.fetch_to_local(file_ref)
         result = process_sales_pipeline(local_file_path, company_id)
 
         # ── ComputedInsights: upsert per (company_id, date_range) ─────────────
@@ -32,7 +57,7 @@ def process_sales_file(self, file_id: str, company_id: str, local_file_path: str
                 existing.summary = insights["summary"]
                 existing.opportunities = insights["opportunities"]
                 existing.charts = insights["charts"]
-                existing.computed_at = datetime.utcnow()
+                existing.computed_at = utcnow()
             else:
                 db.add(ComputedInsights(
                     company_id=company_id,
@@ -43,25 +68,54 @@ def process_sales_file(self, file_id: str, company_id: str, local_file_path: str
                 ))
 
         # ── CustomerProfile: replace all profiles for this company ────────────
+        # Antes de apagar, preserva contatos/opt-out já existentes (cadastro
+        # manual do vendedor não pode ser perdido no re-upload). O upload vence
+        # para phone/email quando os traz; senão mantém o valor preservado.
+        # contact_opt_out é sempre preservado (decisão humana).
+        preserved = {
+            row.customer_hash: (row.phone, row.email, row.contact_opt_out)
+            for row in db.query(
+                CustomerProfile.customer_hash,
+                CustomerProfile.phone,
+                CustomerProfile.email,
+                CustomerProfile.contact_opt_out,
+            ).filter_by(company_id=company_id).all()
+        }
+        # Opt-out durável (LGPD): fonte de verdade que sobrevive ao rebuild mesmo
+        # quando o cliente sumiu do CSV anterior e reapareceu agora.
+        opted_out = {
+            r[0] for r in db.query(ContactOptOut.customer_hash)
+            .filter_by(company_id=company_id).all()
+        }
         db.query(CustomerProfile).filter_by(company_id=company_id).delete()
-        db.bulk_save_objects([
-            CustomerProfile(
+        new_profiles = []
+        for p in result["customer_profiles"]:
+            old_phone, old_email, old_opt_out = preserved.get(p["customer_hash"], (None, None, False))
+            new_profiles.append(CustomerProfile(
                 company_id=company_id,
                 customer_hash=p["customer_hash"],
                 customer_name=p["customer_name"],
+                phone=p.get("phone") or old_phone,
+                email=p.get("email") or old_email,
+                contact_opt_out=bool(old_opt_out) or (p["customer_hash"] in opted_out),
+                document_id=p.get("document_id"),
+                branch=p.get("branch"),
+                salesperson=p.get("salesperson"),
                 total_revenue=p["total_revenue"],
                 percentage=p["percentage"],
                 last_purchase_date=p["last_purchase_date"],
                 recency_days=p["recency_days"],
+                avg_interval_days=p.get("avg_interval_days", 0.0),
+                churn_risk=p.get("churn_risk", "none"),
+                churn_score=p.get("churn_score", 0),
                 trend=p["trend"],
                 segment=p["segment"],
                 rfv=p["rfv"],
                 top_products=p["top_products"],
                 monthly_revenue=p["monthly_revenue"],
                 alerts=p["alerts"],
-            )
-            for p in result["customer_profiles"]
-        ])
+            ))
+        db.bulk_save_objects(new_profiles)
 
         # ── AnalysisResult: summary for history view ──────────────────────────
         db.add(AnalysisResult(
@@ -81,6 +135,19 @@ def process_sales_file(self, file_id: str, company_id: str, local_file_path: str
             db_file.error_message = None
 
         db.commit()
+
+        # Retenção opt-in da fonte (habilita reprocessar sem novo upload).
+        if _RETAIN_SOURCE:
+            should_delete_file = False
+
+        # ── Loop fechado: resolve atribuições de receita recuperada ───────────
+        # Os perfis acabaram de ser reconstruídos com os dados novos; verifica
+        # quais clientes contatados voltaram a comprar.
+        try:
+            from app.services.outreach_service import resolve_attributions
+            resolve_attributions(db, company_id)
+        except Exception as exc:
+            logger.warning("worker.attribution.error", extra={"company_id": company_id, "error": str(exc)})
 
         # Invalidate Redis insights cache for all date ranges
         _invalidate_insights_cache(company_id)
@@ -119,8 +186,20 @@ def process_sales_file(self, file_id: str, company_id: str, local_file_path: str
 
     finally:
         db.close()
-        if should_delete_file:
-            _delete_raw_file(local_file_path)
+        try:
+            lock.release()
+        except Exception:
+            # lock pode ter expirado por TTL — não é erro fatal
+            pass
+
+        if storage.is_remote_ref(file_ref):
+            # A cópia local baixada é sempre descartável (re-baixa em retry).
+            if local_file_path:
+                storage.cleanup_local(local_file_path)
+            if should_delete_file:
+                storage.delete(file_ref)
+        elif should_delete_file:
+            _delete_raw_file(file_ref)
 
 
 def _delete_raw_file(path: str) -> None:
@@ -145,4 +224,10 @@ def _mark_failed(db, file_id: str, message: str) -> None:
     if db_file:
         db_file.status = "failed"
         db_file.error_message = message
+        # Reverte o contador — upload falhou, não deve contar contra a cota.
+        db.execute(
+            update(Company)
+            .where(Company.id == db_file.company_id, Company.uploads_used > 0)
+            .values(uploads_used=Company.uploads_used - 1)
+        )
         db.commit()

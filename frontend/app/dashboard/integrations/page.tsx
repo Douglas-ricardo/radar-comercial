@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { DashboardHeader } from '@/components/dashboard/header'
+import { ProtectedRoute } from '@/lib/auth/protected-route'
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from '@/components/ui/card'
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
@@ -18,17 +20,17 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Plug2, Plus, Copy, Trash2, Key, Clock, CheckCircle2 } from 'lucide-react'
+import { Plug2, Plus, Copy, Trash2, Key, Clock, CheckCircle2, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
-import type { ApiKey, NewApiKey } from '@/types'
+import type { ApiKey, NewApiKey, SyncConfig } from '@/types'
 
 function formatDate(iso: string | null) {
   if (!iso) return '—'
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso))
 }
 
-export default function IntegrationsPage() {
+function IntegrationsPageContent() {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
@@ -38,14 +40,89 @@ export default function IntegrationsPage() {
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // Google Sheets sync state
+  const [syncConfig, setSyncConfig] = useState<SyncConfig | null>(null)
+  const [syncLoading, setSyncLoading] = useState(true)
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [sheetName, setSheetName] = useState('')
+  const [syncEnabled, setSyncEnabled] = useState(true)
+  const [isSavingSync, setIsSavingSync] = useState(false)
+  const [isTriggeringSync, setIsTriggeringSync] = useState(false)
+
   const loadKeys = useCallback(async () => {
     setIsLoading(true)
-    const res = await api.integrations.listKeys()
-    if (res.success && res.data) setKeys(res.data)
-    setIsLoading(false)
+    try {
+      const res = await api.integrations.listKeys()
+      if (res.success && res.data) setKeys(res.data)
+    } catch {
+      toast.error('Não foi possível carregar as chaves de API.')
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  useEffect(() => { loadKeys() }, [loadKeys])
+  const loadSyncConfig = useCallback(async () => {
+    setSyncLoading(true)
+    try {
+      const res = await api.integrations.getSyncStatus()
+      if (res.success && res.data) {
+        setSyncConfig(res.data)
+        setSheetUrl(res.data.sheetUrl ?? '')
+        setSheetName(res.data.sheetName ?? '')
+        setSyncEnabled(res.data.enabled)
+      }
+    } catch {
+      toast.error('Não foi possível carregar a configuração de sincronização.')
+    } finally {
+      setSyncLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadKeys()
+    loadSyncConfig()
+  }, [loadKeys, loadSyncConfig])
+
+  const handleSaveSync = async () => {
+    if (!sheetUrl.trim()) {
+      toast.error('Informe a URL da planilha.')
+      return
+    }
+    setIsSavingSync(true)
+    try {
+      const res = await api.integrations.saveSyncConfig({
+        sheetUrl: sheetUrl.trim(),
+        sheetName: sheetName.trim() || undefined,
+        enabled: syncEnabled,
+      })
+      if (res.success) {
+        toast.success('Configuração salva.')
+        loadSyncConfig()
+      } else {
+        toast.error(res.error ?? 'Erro ao salvar configuração.')
+      }
+    } catch {
+      toast.error('Erro de conexão.')
+    } finally {
+      setIsSavingSync(false)
+    }
+  }
+
+  const handleTriggerSync = async () => {
+    setIsTriggeringSync(true)
+    try {
+      const res = await api.integrations.triggerSync()
+      if (res.success) {
+        toast.success('Sincronização iniciada. Aguarde alguns instantes.')
+      } else {
+        toast.error(res.error ?? 'Erro ao iniciar sincronização.')
+      }
+    } catch {
+      toast.error('Erro de conexão.')
+    } finally {
+      setIsTriggeringSync(false)
+    }
+  }
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return
@@ -91,21 +168,23 @@ export default function IntegrationsPage() {
         title="Integrações"
         description="Gerencie API Keys para ingestão automática de dados via ERP ou n8n"
       />
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6">
 
         {/* API Keys */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5" />
+        <Card className="rounded-2xl border-border shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div className="space-y-1.5">
+              <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+                  <Key className="h-4 w-4" />
+                </span>
                 API Keys
               </CardTitle>
               <CardDescription>
-                Use estas chaves no header <code className="bg-muted px-1 rounded text-xs">X-API-Key</code> para ingerir dados via <code className="bg-muted px-1 rounded text-xs">POST /api/data/ingest</code>
+                Use estas chaves no header <code className="bg-muted px-1 rounded text-xs font-mono">X-API-Key</code> para ingerir dados via <code className="bg-muted px-1 rounded text-xs font-mono">POST /api/data/ingest</code>
               </CardDescription>
             </div>
-            <Button onClick={() => setShowCreateDialog(true)} size="sm">
+            <Button onClick={() => setShowCreateDialog(true)} size="sm" className="shrink-0">
               <Plus className="h-4 w-4 mr-2" />
               Nova chave
             </Button>
@@ -116,24 +195,28 @@ export default function IntegrationsPage() {
                 <Spinner className="h-6 w-6" />
               </div>
             ) : keys.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Plug2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">Nenhuma chave criada ainda.</p>
-                <p className="text-xs mt-1">Crie uma chave para integrar seu ERP ou n8n.</p>
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent mb-4">
+                  <Plug2 className="h-7 w-7 text-primary" />
+                </div>
+                <p className="font-medium text-foreground">Nenhuma chave criada ainda</p>
+                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                  Crie uma chave para integrar seu ERP ou n8n e enviar dados automaticamente.
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
                 {keys.map((key) => (
                   <div
                     key={key.id}
-                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
+                    className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-all hover:shadow-md hover:border-primary/30"
                   >
-                    <div className="space-y-0.5">
-                      <p className="font-medium text-sm">{key.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono">
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm text-foreground truncate">{key.name}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">
                         {key.prefix}••••••••••••••••••••
                       </p>
-                      <div className="flex items-center gap-3 mt-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           Criada {formatDate(key.createdAt)}
@@ -148,8 +231,9 @@ export default function IntegrationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="text-destructive hover:text-destructive h-8 w-8"
+                      className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
                       onClick={() => setRevokeTarget(key)}
+                      aria-label={`Revogar chave ${key.name}`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -160,14 +244,112 @@ export default function IntegrationsPage() {
           </CardContent>
         </Card>
 
-        {/* Docs */}
-        <Card>
+        {/* Google Sheets Sync */}
+        <Card className="rounded-2xl border-border shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Como usar</CardTitle>
+            <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+                <RefreshCw className="h-4 w-4" />
+              </span>
+              Sincronização Google Sheets
+            </CardTitle>
+            <CardDescription>
+              Conecte uma planilha Google Sheets para importar dados de vendas automaticamente a cada 6 horas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {syncLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Spinner className="h-6 w-6" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {syncConfig?.lastSyncAt && (
+                  <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+                    syncConfig.lastSyncStatus === 'error'
+                      ? 'border-destructive/40 bg-destructive/5 text-destructive'
+                      : 'border-border bg-muted/40 text-muted-foreground'
+                  }`}>
+                    {syncConfig.lastSyncStatus === 'ok' ? (
+                      <CheckCircle2 className="h-4 w-4 mt-0.5 text-success shrink-0" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mt-0.5 shrink-0" />
+                    )}
+                    <div>
+                      <span className="font-medium">
+                        {syncConfig.lastSyncStatus === 'ok' ? 'Última sincronização: ' : 'Erro na última sincronização: '}
+                      </span>
+                      {syncConfig.lastSyncStatus === 'ok'
+                        ? formatDate(syncConfig.lastSyncAt)
+                        : syncConfig.lastSyncError ?? 'Erro desconhecido'}
+                    </div>
+                  </div>
+                )}
+
+                <Field>
+                  <FieldLabel htmlFor="sheet-url">URL da planilha *</FieldLabel>
+                  <Input
+                    id="sheet-url"
+                    placeholder="https://docs.google.com/spreadsheets/d/..."
+                    value={sheetUrl}
+                    onChange={(e) => setSheetUrl(e.target.value)}
+                  />
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="sheet-name">Nome da aba (opcional)</FieldLabel>
+                  <Input
+                    id="sheet-name"
+                    placeholder="Deixe em branco para usar a primeira aba"
+                    value={sheetName}
+                    onChange={(e) => setSheetName(e.target.value)}
+                  />
+                </Field>
+
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Sincronização automática</p>
+                    <p className="text-xs text-muted-foreground">Atualiza a cada 6 horas automaticamente</p>
+                  </div>
+                  <Switch
+                    checked={syncEnabled}
+                    onCheckedChange={setSyncEnabled}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <Button onClick={handleSaveSync} disabled={isSavingSync}>
+                    {isSavingSync && <Spinner className="mr-2 h-4 w-4" />}
+                    Salvar configuração
+                  </Button>
+                  {syncConfig && (
+                    <Button
+                      variant="outline"
+                      onClick={handleTriggerSync}
+                      disabled={isTriggeringSync || !syncEnabled}
+                    >
+                      {isTriggeringSync ? (
+                        <Spinner className="mr-2 h-4 w-4" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Sincronizar agora
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Docs */}
+        <Card className="rounded-2xl border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">Como usar</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-muted-foreground">
             <p>Envie dados de vendas programaticamente com uma requisição POST:</p>
-            <pre className="bg-muted rounded-lg p-4 text-xs overflow-auto">
+            <pre className="bg-muted border border-border rounded-xl p-4 text-xs overflow-auto font-mono text-foreground">
 {`POST /api/data/ingest
 X-API-Key: rc_live_sua_chave_aqui
 Content-Type: application/json
@@ -190,12 +372,12 @@ Content-Type: application/json
               para acompanhar o processamento.
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
-              <Badge variant="secondary">n8n</Badge>
-              <Badge variant="secondary">Omie</Badge>
-              <Badge variant="secondary">Bling</Badge>
-              <Badge variant="secondary">Conta Azul</Badge>
-              <Badge variant="secondary">Google Sheets</Badge>
-              <Badge variant="secondary">Zapier</Badge>
+              <Badge variant="secondary" className="rounded-full">n8n</Badge>
+              <Badge variant="secondary" className="rounded-full">Omie</Badge>
+              <Badge variant="secondary" className="rounded-full">Bling</Badge>
+              <Badge variant="secondary" className="rounded-full">Conta Azul</Badge>
+              <Badge variant="secondary" className="rounded-full">Google Sheets</Badge>
+              <Badge variant="secondary" className="rounded-full">Zapier</Badge>
             </div>
           </CardContent>
         </Card>
@@ -238,14 +420,14 @@ Content-Type: application/json
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <CheckCircle2 className="h-5 w-5 text-success" />
               Chave criada com sucesso
             </DialogTitle>
             <DialogDescription>
               Copie e guarde agora — esta chave não será exibida novamente.
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg border bg-muted p-3 font-mono text-sm break-all">
+          <div className="rounded-xl border border-primary/30 bg-accent/40 p-3.5 font-mono text-sm break-all text-foreground">
             {createdKey?.key}
           </div>
           <Button
@@ -254,7 +436,7 @@ Content-Type: application/json
             onClick={() => handleCopy(createdKey?.key ?? '')}
           >
             {copied ? (
-              <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+              <CheckCircle2 className="mr-2 h-4 w-4 text-success" />
             ) : (
               <Copy className="mr-2 h-4 w-4" />
             )}
@@ -287,5 +469,13 @@ Content-Type: application/json
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+export default function IntegrationsPage() {
+  return (
+    <ProtectedRoute requiredRoles={['admin']}>
+      <IntegrationsPageContent />
+    </ProtectedRoute>
   )
 }

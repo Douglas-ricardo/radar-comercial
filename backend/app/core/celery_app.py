@@ -1,10 +1,22 @@
 # app/core/celery_app.py
 import os
+
+# macOS fork-safety: polars/pyarrow criam threadpools nativos no import.
+# O pool prefork do Celery faz fork() e herda esse estado, causando SIGSEGV
+# ao processar o arquivo. Esta flag torna o fork seguro no macOS; é inofensiva
+# em Linux (produção), onde o prefork funciona normalmente.
+os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 from celery import Celery
 from celery.schedules import crontab
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Observabilidade nos workers também (degrada sem SENTRY_DSN).
+from app.core.observability import configure_logging, init_sentry
+configure_logging()
+init_sentry()
 
 REDIS_URL = os.getenv("CELERY_BROKER_URL")
 if not REDIS_URL:
@@ -14,7 +26,7 @@ celery_app = Celery(
     "radar_comercial_worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.workers.tasks", "app.workers.notification_tasks"],
+    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks"],
 )
 
 celery_app.conf.update(
@@ -30,6 +42,18 @@ celery_app.conf.update(
         "send-daily-notifications": {
             "task": "send_daily_notifications",
             "schedule": crontab(hour=11, minute=0),  # 11:00 UTC = 08:00 BRT
+        },
+        "auto-sync-all-sheets": {
+            "task": "auto_sync_all_sheets",
+            "schedule": crontab(minute=0),  # todo início de hora
+        },
+        "send-daily-outreach": {
+            "task": "send_daily_outreach",
+            "schedule": crontab(minute=5),  # toda hora; a task filtra por send_hour
+        },
+        "process-cadence-steps": {
+            "task": "process_cadence_steps",
+            "schedule": crontab(minute="*/15"),  # a cada 15 min; processa passos vencidos
         },
     },
 )

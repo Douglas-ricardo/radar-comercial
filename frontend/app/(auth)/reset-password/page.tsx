@@ -71,8 +71,8 @@ function ResetPasswordForm() {
 
   if (success) {
     return (
-      <Alert className="border-green-200 bg-green-50 text-green-800">
-        <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden="true" />
+      <Alert className="border-success/30 bg-success/10 text-foreground">
+        <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
         <AlertDescription>
           Senha redefinida com sucesso! Redirecionando para o login...
         </AlertDescription>
@@ -162,7 +162,7 @@ export default function ResetPasswordPage() {
         <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
           <Lock className="h-6 w-6 text-primary" aria-hidden="true" />
         </div>
-        <CardTitle className="text-2xl font-bold">Redefinir senha</CardTitle>
+        <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Redefinir senha</CardTitle>
         <CardDescription>Escolha uma nova senha para sua conta</CardDescription>
       </CardHeader>
 

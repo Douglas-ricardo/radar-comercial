@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/lib/auth/auth-context'
 import { DashboardHeader } from '@/components/dashboard/header'
 import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
+  Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { OpportunityCard } from '@/components/opportunities/opportunity-card'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -19,12 +19,12 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
-import {
-  Briefcase, TrendingUp, Phone, CheckCircle2, XCircle,
-  ChevronRight, Medal, DollarSign,
-} from 'lucide-react'
-import { api } from '@/lib/api/client'
+import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { api, opportunitiesApi } from '@/lib/api/client'
+import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { CarteiraOpportunity, OpportunityStatus, RankingEntry } from '@/types'
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
@@ -34,32 +34,19 @@ const STATUS_LABELS: Record<OpportunityStatus, string> = {
   lost: 'Perdido',
 }
 
-const STATUS_COLORS: Record<OpportunityStatus, string> = {
-  to_contact: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  contacted: 'bg-blue-100 text-blue-800 border-blue-200',
-  won: 'bg-green-100 text-green-800 border-green-200',
-  lost: 'bg-red-100 text-red-800 border-red-200',
-}
+const COLUMNS: { status: OpportunityStatus; label: string; dot: string }[] = [
+  { status: 'to_contact', label: 'A contatar', dot: 'bg-warning' },
+  { status: 'contacted', label: 'Contatado', dot: 'bg-primary' },
+  { status: 'won', label: 'Ganho', dot: 'bg-success' },
+  { status: 'lost', label: 'Perdido', dot: 'bg-destructive' },
+]
 
-const STATUS_ICONS: Record<OpportunityStatus, React.ReactNode> = {
-  to_contact: <Phone className="h-3.5 w-3.5" />,
-  contacted: <ChevronRight className="h-3.5 w-3.5" />,
-  won: <CheckCircle2 className="h-3.5 w-3.5" />,
-  lost: <XCircle className="h-3.5 w-3.5" />,
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
-}
-
-function StatusBadge({ status }: { status: OpportunityStatus }) {
+function FunnelStage({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[status]}`}
-    >
-      {STATUS_ICONS[status]}
-      {STATUS_LABELS[status]}
-    </span>
+    <div>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={cn('mt-0.5 text-sm font-semibold tabular-nums', tone ?? 'text-foreground')}>{formatCurrency(value)}</p>
+    </div>
   )
 }
 
@@ -111,7 +98,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
     <Dialog open={!!opp} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{opp?.customer}</DialogTitle>
+          <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">{opp?.customer}</DialogTitle>
           <DialogDescription>
             Valor esperado: {opp ? formatCurrency(opp.expectedValue) : '—'}
             {opp?.daysInactive ? ` · ${opp.daysInactive} dias sem comprar` : ''}
@@ -154,18 +141,41 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
 }
 
 export default function CarteiraPage() {
-  const { company } = useAuth()
+  const { company, user } = useAuth()
+  const canUseAI = user?.role === 'admin' || user?.role === 'analyst'
+  const isAdmin = user?.role === 'admin'
   const [opportunities, setOpportunities] = useState<CarteiraOpportunity[]>([])
   const [ranking, setRanking] = useState<RankingEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedOpp, setSelectedOpp] = useState<CarteiraOpportunity | null>(null)
-  const [statusFilter, setStatusFilter] = useState<OpportunityStatus | 'all'>('all')
+  const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
+    open: false, text: '', loading: false,
+  })
+  // Filtros de segmentação (só admin vê o filtro de filial/vendedor)
+  const [filterBranch, setFilterBranch] = useState('')
+  const [filterSalesperson, setFilterSalesperson] = useState('')
+  const [appliedBranch, setAppliedBranch] = useState('')
+  const [appliedSalesperson, setAppliedSalesperson] = useState('')
 
-  const load = useCallback(async () => {
+  async function handleGenerateMessage(opp: CarteiraOpportunity) {
+    setMsgModal({ open: true, text: '', loading: true })
+    try {
+      const res = await opportunitiesApi.generateMessage(opp.id, opp.customerHash, '1m')
+      if (res.success && res.data) {
+        setMsgModal({ open: true, text: res.data.message, loading: false })
+      } else {
+        setMsgModal({ open: true, text: 'Erro ao gerar mensagem. Tente novamente.', loading: false })
+      }
+    } catch {
+      setMsgModal({ open: true, text: 'Erro ao gerar mensagem. Tente novamente.', loading: false })
+    }
+  }
+
+  const load = useCallback(async (branch?: string, salesperson?: string) => {
     if (!company?.id) return
     setIsLoading(true)
     const [oppsRes, rankRes] = await Promise.all([
-      api.carteira.list(company.id),
+      api.carteira.list(company.id, undefined, branch || undefined, salesperson || undefined),
       api.carteira.getRanking(company.id),
     ])
     if (oppsRes.success && oppsRes.data) setOpportunities(oppsRes.data)
@@ -175,17 +185,33 @@ export default function CarteiraPage() {
 
   useEffect(() => { load() }, [load])
 
-  const filtered = statusFilter === 'all'
-    ? opportunities
-    : opportunities.filter((o) => o.action.status === statusFilter)
-
-  const counts = {
-    all: opportunities.length,
-    to_contact: opportunities.filter((o) => o.action.status === 'to_contact').length,
-    contacted: opportunities.filter((o) => o.action.status === 'contacted').length,
-    won: opportunities.filter((o) => o.action.status === 'won').length,
-    lost: opportunities.filter((o) => o.action.status === 'lost').length,
+  const applyFilters = () => {
+    setAppliedBranch(filterBranch)
+    setAppliedSalesperson(filterSalesperson)
+    load(filterBranch, filterSalesperson)
   }
+
+  const clearFilters = () => {
+    setFilterBranch('')
+    setFilterSalesperson('')
+    setAppliedBranch('')
+    setAppliedSalesperson('')
+    load()
+  }
+
+  const hasActiveFilters = appliedBranch || appliedSalesperson
+
+  const byStatus: Record<OpportunityStatus, CarteiraOpportunity[]> = {
+    to_contact: opportunities.filter((o) => o.action.status === 'to_contact'),
+    contacted: opportunities.filter((o) => o.action.status === 'contacted'),
+    won: opportunities.filter((o) => o.action.status === 'won'),
+    lost: opportunities.filter((o) => o.action.status === 'lost'),
+  }
+  const sumVal = (arr: CarteiraOpportunity[]) => arr.reduce((s, o) => s + o.expectedValue, 0)
+  const identified = sumVal(opportunities)
+  const contactedVal = sumVal([...byStatus.contacted, ...byStatus.won, ...byStatus.lost])
+  const wonVal = sumVal(byStatus.won)
+  const roi = identified > 0 ? Math.round((wonVal / identified) * 100) : 0
 
   const totalWon = ranking.reduce((sum, r) => sum + r.totalWonValue, 0)
 
@@ -195,7 +221,43 @@ export default function CarteiraPage() {
         title="Carteira Ativa"
         description="Gerencie o status comercial das oportunidades identificadas"
       />
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6">
+
+        {/* Filtros de segmentação — só admins veem (analistas têm scope automático) */}
+        {isAdmin && (
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
+            <Filter className="h-4 w-4 text-muted-foreground mt-1 shrink-0" />
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Filial</label>
+              <Input
+                className="h-8 w-36 text-sm"
+                placeholder="ex: SP-001"
+                value={filterBranch}
+                onChange={(e) => setFilterBranch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Vendedor</label>
+              <Input
+                className="h-8 w-36 text-sm"
+                placeholder="nome ou código"
+                value={filterSalesperson}
+                onChange={(e) => setFilterSalesperson(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+              />
+            </div>
+            <Button size="sm" variant="outline" className="h-8" onClick={applyFilters}>
+              Filtrar
+            </Button>
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5 mr-1" />
+                Limpar
+              </Button>
+            )}
+          </div>
+        )}
 
         <Tabs defaultValue="oportunidades">
           <TabsList>
@@ -209,72 +271,93 @@ export default function CarteiraPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Tab Oportunidades */}
-          <TabsContent value="oportunidades" className="space-y-4 mt-4">
-            {/* Filtros rápidos */}
-            <div className="flex flex-wrap gap-2">
-              {(['all', 'to_contact', 'contacted', 'won', 'lost'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors
-                    ${statusFilter === s
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'hover:bg-muted border-border text-muted-foreground'
-                    }`}
-                >
-                  {s === 'all' ? 'Todas' : STATUS_LABELS[s]}
-                  <span className="rounded-full bg-current/10 px-1.5">{counts[s]}</span>
-                </button>
-              ))}
-            </div>
+          {/* Tab Oportunidades — funil + board por status */}
+          <TabsContent value="oportunidades" className="space-y-5 mt-4">
+            {/* Funil + ROI */}
+            {!isLoading && opportunities.length > 0 && (
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-wrap items-center justify-between gap-6 py-5">
+                  <div className="flex items-center gap-3">
+                    <FunnelStage label="Identificado" value={identified} />
+                    <ArrowRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                    <FunnelStage label="Contatado" value={contactedVal} tone="text-primary" />
+                    <ArrowRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                    <FunnelStage label="Ganho" value={wonVal} tone="text-success" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">ROI da carteira</p>
+                    <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{roi}%</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {isLoading ? (
-              <div className="flex items-center justify-center py-16">
-                <Spinner className="h-8 w-8" />
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {COLUMNS.map((col) => (
+                  <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
+                    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <span className={cn('h-2 w-2 rounded-full', col.dot)} aria-hidden />
+                        {col.label}
+                      </span>
+                    </div>
+                    <div className="flex-1 space-y-2 p-2">
+                      <div className="h-16 rounded-xl bg-muted animate-pulse" />
+                      <div className="h-16 rounded-xl bg-muted animate-pulse" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ) : filtered.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Briefcase className="h-12 w-12 mb-4 opacity-25" />
-                  <p className="text-sm font-medium">Nenhuma oportunidade</p>
-                  <p className="text-xs mt-1">Processe uma base de vendas para gerar oportunidades.</p>
+            ) : opportunities.length === 0 ? (
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                    <Briefcase className="h-7 w-7" />
+                  </div>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Nenhuma oportunidade ainda</p>
+                  <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                    Processe uma base de vendas para identificar clientes que pararam de comprar e gerar oportunidades de recuperação.
+                  </p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-3">
-                {filtered.map((opp) => (
-                  <Card
-                    key={opp.id}
-                    className="cursor-pointer hover:border-primary/50 transition-colors"
-                    onClick={() => setSelectedOpp(opp)}
-                  >
-                    <CardContent className="flex items-center justify-between p-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-sm">{opp.customer}</p>
-                          {opp.daysInactive > 0 && (
-                            <span className="text-xs text-muted-foreground">
-                              {opp.daysInactive} dias inativo
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-green-700">
-                            {formatCurrency(opp.expectedValue)}
-                          </span>
-                          <Badge variant="outline" className="text-xs capitalize">
-                            {opp.confidence}
-                          </Badge>
-                        </div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {COLUMNS.map((col) => {
+                  const items = byStatus[col.status]
+                  return (
+                    <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
+                      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+                        <span className="flex items-center gap-2 text-sm font-medium">
+                          <span className={cn('h-2 w-2 rounded-full', col.dot)} aria-hidden />
+                          {col.label}
+                          <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
+                        </span>
+                        <span className="text-xs font-semibold tabular-nums text-muted-foreground">{formatCurrency(sumVal(items))}</span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <StatusBadge status={opp.action.status} />
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <div className="flex-1 space-y-2 p-2">
+                        {items.length === 0 ? (
+                          <p className="py-10 text-center text-xs text-muted-foreground">Nada por aqui</p>
+                        ) : (
+                          items.map((opp) => (
+                            <OpportunityCard
+                              key={opp.id}
+                              compact
+                              customer={opp.customer}
+                              expectedValue={opp.expectedValue}
+                              daysInactive={opp.daysInactive}
+                              product={opp.product}
+                              frequency={opp.frequency}
+                              confidence={opp.confidence}
+                              onOpen={() => setSelectedOpp(opp)}
+                              onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
+                            />
+                          ))
+                        )}
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </TabsContent>
@@ -282,68 +365,76 @@ export default function CarteiraPage() {
           {/* Tab Ranking */}
           <TabsContent value="ranking" className="space-y-4 mt-4">
             {ranking.length > 0 && (
-              <Card>
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <DollarSign className="h-4 w-4 text-green-600" />
+                  <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <DollarSign className="h-4 w-4 text-success" />
                     Total convertido
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-green-700">{formatCurrency(totalWon)}</p>
+                  <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-success tabular-nums">{formatCurrency(totalWon)}</p>
                 </CardContent>
               </Card>
             )}
 
             {isLoading ? (
-              <div className="flex justify-center py-10"><Spinner className="h-6 w-6" /></div>
+              <div className="space-y-3">
+                <div className="h-32 rounded-2xl bg-muted animate-pulse" />
+                <div className="h-32 rounded-2xl bg-muted animate-pulse" />
+              </div>
             ) : ranking.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <Medal className="h-10 w-10 mb-3 opacity-25" />
-                  <p className="text-sm">Nenhuma ação registrada ainda.</p>
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                    <Medal className="h-7 w-7" />
+                  </div>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Ranking ainda vazio</p>
+                  <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                    Registre o status comercial das oportunidades para ver a conversão por vendedor.
+                  </p>
                 </CardContent>
               </Card>
             ) : (
               <div className="space-y-3">
                 {ranking.map((entry, idx) => (
-                  <Card key={entry.userId}>
+                  <Card key={entry.userId} className="rounded-2xl border border-border bg-card shadow-sm">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3">
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold
-                            ${idx === 0 ? 'bg-yellow-100 text-yellow-700' :
-                              idx === 1 ? 'bg-gray-100 text-gray-600' :
-                              idx === 2 ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}
+                          <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold tabular-nums
+                            ${idx === 0 ? 'bg-warning/15 text-warning' :
+                              idx === 1 ? 'bg-secondary text-foreground' :
+                              'bg-muted text-muted-foreground'}`}
                           >
                             {idx + 1}
                           </div>
                           <div>
-                            <p className="font-medium text-sm">{entry.userName}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-sm font-semibold text-foreground">{entry.userName}</p>
+                            <p className="text-xs text-muted-foreground tabular-nums">
                               {entry.conversionRate}% de conversão
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold text-green-700 text-sm">
+                          <p className="font-[family-name:var(--font-display)] text-xl font-bold leading-none tracking-[-0.02em] text-success tabular-nums">
                             {formatCurrency(entry.totalWonValue)}
                           </p>
-                          <p className="text-xs text-muted-foreground">{entry.won} ganhos</p>
+                          <p className="text-xs text-muted-foreground tabular-nums mt-1">{entry.won} ganhos</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-4 gap-2 text-center">
                         {(
                           [
-                            ['A contatar', entry.toContact, 'text-yellow-700'],
-                            ['Contatado', entry.contacted, 'text-blue-700'],
-                            ['Ganho', entry.won, 'text-green-700'],
-                            ['Perdido', entry.lost, 'text-red-700'],
+                            ['A contatar', entry.toContact, 'text-warning'],
+                            ['Contatado', entry.contacted, 'text-primary'],
+                            ['Ganho', entry.won, 'text-success'],
+                            ['Perdido', entry.lost, 'text-destructive'],
                           ] as const
                         ).map(([label, count, color]) => (
-                          <div key={label} className="rounded-lg bg-muted/50 py-2">
-                            <p className={`text-lg font-bold ${color}`}>{count}</p>
-                            <p className="text-xs text-muted-foreground">{label}</p>
+                          <div key={label} className="rounded-xl border border-border bg-secondary/40 py-2">
+                            <p className={`font-[family-name:var(--font-display)] text-xl font-bold tabular-nums ${color}`}>{count}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
                           </div>
                         ))}
                       </div>
@@ -362,6 +453,40 @@ export default function CarteiraPage() {
         onSaved={load}
         companyId={company?.id ?? ''}
       />
+
+      {/* ── Modal de mensagem gerada por IA ────────────────────────────── */}
+      <Dialog open={msgModal.open} onOpenChange={(open) => setMsgModal(m => ({ ...m, open }))}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Mensagem para WhatsApp</DialogTitle>
+            <DialogDescription>Edite se necessário antes de copiar.</DialogDescription>
+          </DialogHeader>
+          {msgModal.loading ? (
+            <div className="space-y-2 py-4">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-4/6" />
+            </div>
+          ) : (
+            <Textarea
+              className="min-h-[160px] resize-none text-sm"
+              value={msgModal.text}
+              onChange={(e) => setMsgModal(m => ({ ...m, text: e.target.value }))}
+            />
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setMsgModal(m => ({ ...m, open: false }))}>
+              Fechar
+            </Button>
+            <Button
+              disabled={msgModal.loading || !msgModal.text}
+              onClick={() => navigator.clipboard.writeText(msgModal.text)}
+            >
+              Copiar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

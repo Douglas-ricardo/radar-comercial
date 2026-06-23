@@ -5,13 +5,14 @@ import uuid
 import magic
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import update
 
 from app.infrastructure.database import get_db_session
+from app.infrastructure import storage
 from app.domain.models import UploadedFile, AnalysisResult, Company
-from app.core.auth import get_current_user_and_company
+from app.core.auth import get_current_user_and_company, require_upload_permission
 from app.services.plan_service import PlanService
 from app.workers.tasks import process_sales_file
 
@@ -19,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["Files"])
 
-# Limite de upload — protege memória/disco contra arquivos absurdamente grandes.
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Limite de upload — configurável via MAX_UPLOAD_MB (default 500).
+# Aumentar sem redimensionar o worker pode causar OOM; veja ETL lazy em etl.py.
+_MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+MAX_FILE_SIZE = _MAX_UPLOAD_MB * 1024 * 1024
 
 
 def _upload_mime_allowed(suffix: str, mime: str) -> bool:
@@ -35,6 +38,7 @@ def _upload_mime_allowed(suffix: str, mime: str) -> bool:
         return mime in (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/zip",
+            "application/octet-stream",
         )
     if suffix == "xls":
         return mime in ("application/vnd.ms-excel", "application/octet-stream")
@@ -48,7 +52,7 @@ _TEMP_DIR.mkdir(parents=True, exist_ok=True)
 @router.post("/upload")
 async def upload_file(
     file: UploadFile,
-    token_data=Depends(get_current_user_and_company),
+    token_data=Depends(require_upload_permission),
     db: Session = Depends(get_db_session),
 ):
     company_id = token_data.company_id
@@ -138,7 +142,7 @@ async def upload_file(
                     db.commit()
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Arquivo muito grande. Limite: {MAX_FILE_SIZE // (1024 * 1024)} MB.",
+                        detail=f"Arquivo muito grande. Limite: {_MAX_UPLOAD_MB} MB.",
                     )
                 buffer.write(chunk)
     except HTTPException:
@@ -168,7 +172,27 @@ async def upload_file(
         },
     )
 
-    process_sales_file.delay(file_id, company_id, local_file_path)
+    # Promove ao object storage (R2/Spaces) quando configurado; senão usa o
+    # path local. A ref resultante é o que o worker recebe.
+    try:
+        file_ref = storage.store_from_local(local_file_path, f"uploads/{company_id}/{file_id}_{safe_filename}")
+    except Exception as exc:
+        storage.cleanup_local(local_file_path)
+        db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
+        db.execute(
+            update(Company)
+            .where(Company.id == company_id)
+            .values(uploads_used=Company.uploads_used - 1)
+        )
+        db.commit()
+        logger.error("file.upload.storage_error", extra={"file_id": file_id, "error": str(exc)})
+        raise HTTPException(status_code=500, detail="Erro ao armazenar o arquivo.")
+
+    # Guarda a ref de origem (habilita reprocessar quando RETAIN_SOURCE_FILES=true).
+    db.query(UploadedFile).filter(UploadedFile.id == file_id).update({"source_ref": file_ref})
+    db.commit()
+
+    process_sales_file.delay(file_id, company_id, file_ref)
 
     return {
         "success": True,
@@ -178,6 +202,39 @@ async def upload_file(
             "message": "Enviado para a fila de processamento.",
         },
     }
+
+
+@router.post("/{file_id}/reprocess")
+def reprocess_file(
+    file_id: str,
+    token_data=Depends(require_upload_permission),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Re-executa o ETL sobre o arquivo de origem, sem novo upload. Só funciona se
+    a empresa habilitou RETAIN_SOURCE_FILES (retenção do arquivo bruto) — senão
+    a fonte foi apagada após o processamento (padrão LGPD) e é preciso reenviar.
+    Não conta contra a cota de uploads.
+    """
+    db_file = (
+        db.query(UploadedFile)
+        .filter(UploadedFile.id == file_id, UploadedFile.company_id == token_data.company_id)
+        .first()
+    )
+    if not db_file:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    if not db_file.source_ref or not storage.source_exists(db_file.source_ref):
+        raise HTTPException(
+            status_code=409,
+            detail="Fonte não disponível para reprocessamento. Reenvie o arquivo "
+            "(retenção de origem desligada por padrão — LGPD).",
+        )
+
+    db_file.status = "processing"
+    db_file.error_message = None
+    db.commit()
+    process_sales_file.delay(file_id, token_data.company_id, db_file.source_ref)
+    return {"success": True, "data": {"id": file_id, "status": "processing"}}
 
 
 @router.get("/{file_id}/status")
@@ -212,17 +269,27 @@ def get_file_status(
 def list_files(
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
-    results = (
+    # Paginação: a lista cresce 1 linha por upload. Default alto (200) mantém o
+    # comportamento atual p/ empresas típicas; total vem em `pagination`.
+    base = (
         db.query(UploadedFile, AnalysisResult)
         .outerjoin(AnalysisResult, AnalysisResult.file_id == UploadedFile.id)
         .filter(UploadedFile.company_id == token_data.company_id)
-        .order_by(UploadedFile.uploaded_at.desc())
+    )
+    total = base.count()
+    results = (
+        base.order_by(UploadedFile.uploaded_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
     return {
         "success": True,
+        "pagination": {"total": total, "limit": limit, "offset": offset},
         "data": [
             {
                 "id": f.id,

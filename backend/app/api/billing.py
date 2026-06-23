@@ -2,6 +2,7 @@
 import logging
 import os
 from datetime import datetime
+from app.core.clock import utcnow
 from typing import Literal, Optional
 
 import stripe
@@ -9,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user_and_company
-from app.domain.models import Company
+from app.core.auth import get_current_user_and_company, require_admin
+from app.domain.models import Company, User
 from app.infrastructure.database import get_db_session
 from app.infrastructure.redis_client import redis_client
 from app.services.plan_service import PlanService
@@ -61,6 +62,36 @@ def _resolve_plan_from_session(session: dict) -> Optional[str]:
     return None
 
 
+def _count_seats(db: Session, company_id: str) -> int:
+    """Assentos cobrados = usuários da empresa (ativos + pendentes ocupam licença)."""
+    return db.query(User).filter(User.company_id == company_id).count()
+
+
+def sync_subscription_seats(company_id: str, db: Session) -> None:
+    """
+    Atualiza a quantity da assinatura Stripe para refletir o nº de usuários
+    (cobrança per-seat). No-op para empresas no plano free / sem assinatura.
+    Falhas no Stripe não devem quebrar o fluxo de equipe — apenas logam.
+    """
+    if not stripe.api_key:
+        return
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company or not company.stripe_subscription_id:
+        return
+    try:
+        sub = stripe.Subscription.retrieve(company.stripe_subscription_id)
+        item_id = sub["items"]["data"][0]["id"]
+        seats = max(_count_seats(db, company_id), 1)
+        stripe.SubscriptionItem.modify(
+            item_id,
+            quantity=seats,
+            proration_behavior="create_prorations",
+        )
+        logger.info("billing.seats.synced", extra={"company_id": company_id, "seats": seats})
+    except Exception as exc:
+        logger.warning("billing.seats.sync_error", extra={"company_id": company_id, "error": str(exc)})
+
+
 def _invalidate_insights_cache(company_id: str) -> None:
     """Limpa o cache de insights após mudança de plano para evitar dados desatualizados."""
     try:
@@ -74,14 +105,11 @@ def _invalidate_insights_cache(company_id: str) -> None:
 @router.post("/create-checkout-session")
 def create_checkout_session(
     data: CheckoutPlanRequest,
-    token_data=Depends(get_current_user_and_company),
+    token_data=Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado (STRIPE_SECRET_KEY).")
-
-    if token_data.role != "admin":
-        raise HTTPException(status_code=403, detail="Apenas administradores podem gerir a subscrição.")
 
     company_id = str(token_data.company_id)
     company = db.query(Company).filter(Company.id == company_id).first()
@@ -91,8 +119,10 @@ def create_checkout_session(
     price_id = _stripe_price_id_for_plan(data.plan)
     frontend = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
+    seats = max(_count_seats(db, company_id), 1)
+
     session = stripe.checkout.Session.create(
-        line_items=[{"price": price_id, "quantity": 1}],
+        line_items=[{"price": price_id, "quantity": seats}],
         mode="subscription",
         client_reference_id=company_id,
         metadata={"plan": data.plan, "company_id": company_id},
@@ -183,7 +213,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db_session)
     company.stripe_subscription_id = subscription if isinstance(subscription, str) else None
     company.plan = novo_plano
     company.uploads_limit = PlanService.get_upload_limit_for_plan(novo_plano)
-    company.plan_updated_at = datetime.utcnow()
+    company.plan_updated_at = utcnow()
 
     db.commit()
 
@@ -206,7 +236,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db_session)
 
 @router.post("/debug-sync-plan")
 def debug_sync_plan(
-    token_data=Depends(get_current_user_and_company),
+    token_data=Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     """
@@ -255,7 +285,7 @@ def debug_sync_plan(
     company.plan = novo_plano
     company.uploads_limit = PlanService.get_upload_limit_for_plan(novo_plano)
     company.stripe_subscription_id = sub["id"]
-    company.plan_updated_at = datetime.utcnow()
+    company.plan_updated_at = utcnow()
     db.commit()
 
     _invalidate_insights_cache(company_id)

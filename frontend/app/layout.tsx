@@ -1,6 +1,6 @@
 //app/layout.tsx
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Geist, Geist_Mono, Bricolage_Grotesque } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from '@/lib/auth/auth-context'
@@ -13,6 +13,14 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   subsets: ['latin'],
   variable: '--font-geist-mono',
+})
+// Display grotesk (Modern Tech): títulos e números-herói. Mapeada em globals.css
+// para --font-display e --font-serif, então o app inteiro migra de tipografia.
+const display = Bricolage_Grotesque({
+  subsets: ['latin'],
+  variable: '--font-bricolage',
+  weight: ['600', '700', '800'],
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
@@ -48,7 +56,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${display.variable} font-sans antialiased`}>
         <AuthProvider>
           {children}
         </AuthProvider>

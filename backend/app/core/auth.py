@@ -1,5 +1,6 @@
 # app/core/auth.py
 import logging
+from app.core.clock import utcnow
 import os
 
 from fastapi import Request # Importe Request
@@ -7,6 +8,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.infrastructure.database import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +31,20 @@ class TokenData(BaseModel):
     user_id: str
     company_id: str
     role: str
+    scope: str | None = None  # "branch:SP-001" → filtra carteira/clientes; None = sem restrição
 
-async def get_current_user_and_company(request: Request) -> TokenData:
+async def get_current_user_and_company(
+    request: Request,
+    db: Session = Depends(get_db_session),
+) -> TokenData:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Não foi possível validar as credenciais.",
     )
-    
+
     # Busca o token no cookie em vez do header
     token = request.cookies.get("radar_session")
-    
+
     if not token:
         raise credentials_exception
 
@@ -47,13 +55,22 @@ async def get_current_user_and_company(request: Request) -> TokenData:
         user_id: str = payload.get("sub")
         company_id: str = payload.get("company_id")
         role: str = payload.get("role", "viewer")
+        scope: str | None = payload.get("scope")
+        token_cv: int = payload.get("cv", 0)
 
         # 🔴 CORREÇÃO: Validar se os dados vitais estão lá
         if user_id is None or company_id is None:
             logger.warning("auth.token.invalid_payload")
             raise credentials_exception
 
-        return TokenData(user_id=user_id, company_id=company_id, role=role)
+        # Revogação: se a senha mudou após o token ser emitido, cv não bate.
+        from app.domain.models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or (user.credential_version or 0) != token_cv:
+            logger.info("auth.token.revoked", extra={"user_id": user_id})
+            raise credentials_exception
+
+        return TokenData(user_id=user_id, company_id=company_id, role=role, scope=scope)
 
     except jwt.ExpiredSignatureError:
         logger.info("auth.token.expired")
@@ -65,6 +82,18 @@ async def get_current_user_and_company(request: Request) -> TokenData:
     except jwt.PyJWTError:
         logger.warning("auth.token.decode_error")
         raise credentials_exception
+
+
+def require_admin(token_data: TokenData = Depends(get_current_user_and_company)) -> TokenData:
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem realizar esta ação.")
+    return token_data
+
+
+def require_analyst_or_above(token_data: TokenData = Depends(get_current_user_and_company)) -> TokenData:
+    if token_data.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Privilégios insuficientes.")
+    return token_data
 
 
 def require_upload_permission(token_data: TokenData = Depends(get_current_user_and_company)):
@@ -95,6 +124,6 @@ def validate_api_key(x_api_key: str | None, db) -> str:
     if not api_key:
         raise HTTPException(status_code=401, detail="API Key inválida ou revogada.")
 
-    api_key.last_used_at = datetime.utcnow()
+    api_key.last_used_at = utcnow()
     db.commit()
     return api_key.company_id

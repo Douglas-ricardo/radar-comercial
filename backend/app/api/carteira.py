@@ -2,12 +2,12 @@
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_and_company
-from app.domain.models import ComputedInsights, OpportunityAction, User
+from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, User
 from app.infrastructure.database import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -29,20 +29,43 @@ class UpsertActionRequest(BaseModel):
 def list_carteira(
     company_id: str,
     status: Optional[str] = None,
+    branch: Optional[str] = None,
+    salesperson: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
 ):
     """
     Returns all opportunities from ComputedInsights (1m) merged with the
-    commercial actions of the calling user. Admins can additionally filter
-    across all users via ?status=.
+    commercial actions of the calling user. Supports filtering by branch,
+    salesperson, and status. Users with scope are auto-filtered to their branch.
     """
     if token_data.company_id != company_id:
         raise HTTPException(status_code=403, detail="Acesso negado.")
 
+    # Escopo automático: se o usuário tem scope "branch:X" e não é admin,
+    # filtra só a filial dele (pode ser sobrescrito por branch= param apenas por admins).
+    effective_branch = branch
+    if token_data.scope and token_data.role != "admin":
+        scope_parts = token_data.scope.split(":", 1)
+        if scope_parts[0] == "branch" and len(scope_parts) == 2:
+            effective_branch = scope_parts[1]
+
+    # Mapa customerHash → (branch, salesperson) para filtro por esses campos.
+    # Consultado só se filtro está ativo (evita query desnecessária).
+    scope_hashes: set | None = None
+    if effective_branch or salesperson:
+        q = db.query(CustomerProfile.customer_hash).filter(
+            CustomerProfile.company_id == company_id
+        )
+        if effective_branch:
+            q = q.filter(CustomerProfile.branch == effective_branch)
+        if salesperson:
+            q = q.filter(CustomerProfile.salesperson == salesperson)
+        scope_hashes = {row[0] for row in q.all()}
+
     # Tenta carregar oportunidades em ordem de preferência de período.
-    # Após o fix do ETL (churned usa df completo), "1m" já inclui todos os churned.
-    # O fallback garante que mesmo datasets pequenos mostrem oportunidades.
     insights = None
     for dr in ("1m", "3m", "6m", "12m"):
         candidate = db.query(ComputedInsights).filter_by(
@@ -66,6 +89,11 @@ def list_carteira(
     result = []
     for opp in raw:
         opp_id = opp.get("customerHash", opp.get("id", ""))
+
+        # Filtro por scope de filial/vendedor
+        if scope_hashes is not None and opp_id not in scope_hashes:
+            continue
+
         action = action_map.get(opp_id)
         opp_status = action.status if action else "to_contact"
 
@@ -81,7 +109,9 @@ def list_carteira(
             },
         })
 
-    return {"success": True, "data": result}
+    total = len(result)
+    page = result[offset: offset + limit]
+    return {"success": True, "data": page, "pagination": {"total": total, "limit": limit, "offset": offset}}
 
 
 @router.post("/{company_id}/actions")
@@ -180,6 +210,6 @@ def get_ranking(
     ranking.sort(key=lambda x: x["won"], reverse=True)
 
     if token_data.role == "analyst":
-        ranking = [r for r in ranking if r["user_id"] == token_data.user_id]
+        ranking = [r for r in ranking if r["userId"] == token_data.user_id]
 
     return {"success": True, "data": ranking}

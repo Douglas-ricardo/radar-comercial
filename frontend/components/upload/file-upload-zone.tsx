@@ -112,8 +112,10 @@ export function FileUploadZone({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          'relative rounded-lg border-2 border-dashed p-8 text-center transition-colors',
-          isDragging && !disabled ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50',
+          'relative rounded-2xl border-2 border-dashed p-10 text-center transition-all',
+          isDragging && !disabled
+            ? 'border-primary bg-accent/40'
+            : 'border-border hover:border-primary hover:bg-accent/20',
           disabled && 'cursor-not-allowed opacity-50',
           error && 'border-destructive'
         )}
@@ -134,29 +136,26 @@ export function FileUploadZone({
         <div className="flex flex-col items-center gap-4">
           <div
             className={cn(
-              'flex h-16 w-16 items-center justify-center rounded-full transition-colors',
-              isDragging ? 'bg-primary/20' : 'bg-secondary'
+              'flex h-16 w-16 items-center justify-center rounded-full transition-all',
+              isDragging
+                ? 'bg-primary text-primary-foreground scale-105'
+                : 'bg-accent text-primary'
             )}
             aria-hidden="true"
           >
-            <Upload
-              className={cn(
-                'h-8 w-8 transition-colors',
-                isDragging ? 'text-primary' : 'text-muted-foreground'
-              )}
-            />
+            <Upload className="h-8 w-8" />
           </div>
 
           <div>
             <label
               htmlFor={inputId}
-              className="text-lg font-medium cursor-pointer hover:text-primary transition-colors"
+              className="text-base font-semibold cursor-pointer text-foreground hover:text-primary transition-colors"
             >
               {isDragging
                 ? 'Solte o arquivo aqui'
                 : 'Arraste seu arquivo ou clique para selecionar'}
             </label>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1.5 text-sm text-muted-foreground">
               Formatos aceitos: CSV, Excel (.xlsx, .xls) — Máximo {maxSize}MB
             </p>
           </div>
@@ -168,7 +167,7 @@ export function FileUploadZone({
         <div
           id={errorId}
           role="alert"
-          className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+          className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm font-medium text-destructive"
         >
           <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{error}</span>
@@ -177,14 +176,14 @@ export function FileUploadZone({
 
       {/* Arquivo selecionado */}
       {selectedFile && !error && (
-        <div className="flex items-center justify-between rounded-md border border-border bg-secondary/50 p-4">
+        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent">
               <FileSpreadsheet className="h-5 w-5 text-primary" aria-hidden="true" />
             </div>
             <div>
-              <p className="font-medium">{selectedFile.name}</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">{selectedFile.name}</p>
+              <p className="text-sm text-muted-foreground tabular-nums">
                 {formatFileSize(selectedFile.size)}
               </p>
             </div>

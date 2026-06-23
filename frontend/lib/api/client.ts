@@ -23,6 +23,12 @@ import type {
   CarteiraOpportunity,
   RankingEntry,
   OpportunityStatus,
+  GenerateMessageResponse,
+  SyncConfig,
+  OutreachConfig,
+  OutreachContact,
+  RecoverySummary,
+  ChurnRiskData,
 } from '@/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
@@ -147,9 +153,23 @@ export const authApi = {
       body: JSON.stringify({ token, new_password: newPassword }),
     })
   },
+
+  async setPassword(newPassword: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth('/auth/set-password', {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    })
+  },
 }
 
 // --------------- Files / Upload ---------------
+
+/** Metadados de paginação devolvidos por GET /files/ (offset-based). */
+export interface FilesListMeta {
+  total: number
+  limit: number
+  offset: number
+}
 
 export const filesApi = {
   /** Upload com progresso real via XHR. Usa cookie automaticamente. */
@@ -199,9 +219,16 @@ export const filesApi = {
     return fetchWithAuth(`/files/${fileId}/status`)
   },
 
-  async list(): Promise<ApiResponse<UploadedFile[]>> {
-    // Backend filtra por company_id via cookie/JWT — não precisa do query string
-    return fetchWithAuth('/files/')
+  async list(
+    params?: { limit?: number; offset?: number }
+  ): Promise<ApiResponse<UploadedFile[]> & { pagination?: FilesListMeta }> {
+    // Backend filtra por company_id via cookie/JWT. limit/offset são opcionais
+    // (default backend: limit=200, offset=0); a meta vem em `pagination`.
+    const qs = new URLSearchParams()
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return fetchWithAuth<UploadedFile[]>(`/files/${suffix}`)
   },
 
   async delete(fileId: string): Promise<ApiResponse<void>> {
@@ -221,6 +248,23 @@ export const insightsApi = {
     if (filters?.dateRange) params.append('date_range', filters.dateRange)
     const query = params.toString() ? `?${params.toString()}` : ''
     return fetchWithAuth(`/insights/${companyId}${query}`, options)
+  },
+
+  // Churn preditivo — clientes prestes a sumir (ação proativa)
+  async getChurnRisk(companyId: string): Promise<ApiResponse<ChurnRiskData>> {
+    return fetchWithAuth(`/insights/${companyId}/churn-risk`)
+  },
+
+  // Baixa o relatório de insights em PDF (gerado no backend). Retorna o Blob
+  // direto — não passa pelo fetchWithAuth porque a resposta é binária, não JSON.
+  async downloadReport(companyId: string, dateRange: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/insights/${companyId}/report?date_range=${encodeURIComponent(dateRange)}`,
+      { credentials: 'include' }
+    )
+    if (response.status === 401) throw new UnauthorizedError()
+    if (!response.ok) throw new Error('Falha ao gerar o relatório PDF.')
+    return response.blob()
   },
 }
 
@@ -246,21 +290,23 @@ export const teamApi = {
   async invite(
     companyId: string,
     email: string,
-    role: TeamMember['role']
+    role: TeamMember['role'],
+    scope?: string | null
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/${companyId}/invite`, {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email, role, scope: scope ?? null }),
     })
   },
 
   async updateRole(
     memberId: string,
-    role: TeamMember['role']
+    role: TeamMember['role'],
+    scope?: string | null
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/members/${memberId}/role`, {
       method: 'PATCH',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ role, ...(scope !== undefined ? { scope } : {}) }),
     })
   },
 
@@ -329,6 +375,21 @@ export const integrationsApi = {
   async revokeKey(keyId: string): Promise<ApiResponse<void>> {
     return fetchWithAuth(`/integrations/keys/${keyId}`, { method: 'DELETE' })
   },
+
+  async getSyncStatus(): Promise<ApiResponse<SyncConfig | null>> {
+    return fetchWithAuth('/integrations/sync/status')
+  },
+
+  async saveSyncConfig(data: { sheetUrl: string; sheetName?: string; enabled: boolean }): Promise<ApiResponse<{ id: string }>> {
+    return fetchWithAuth('/integrations/sync/config', {
+      method: 'POST',
+      body: JSON.stringify({ sheet_url: data.sheetUrl, sheet_name: data.sheetName || null, enabled: data.enabled }),
+    })
+  },
+
+  async triggerSync(): Promise<ApiResponse<void>> {
+    return fetchWithAuth('/integrations/sync/trigger', { method: 'POST' })
+  },
 }
 
 // --------------- Notifications ---------------
@@ -357,9 +418,15 @@ export const notificationsApi = {
 export const carteiraApi = {
   async list(
     companyId: string,
-    status?: OpportunityStatus
+    status?: OpportunityStatus,
+    branch?: string,
+    salesperson?: string
   ): Promise<ApiResponse<CarteiraOpportunity[]>> {
-    const q = status ? `?status=${status}` : ''
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (branch) params.set('branch', branch)
+    if (salesperson) params.set('salesperson', salesperson)
+    const q = params.size ? `?${params.toString()}` : ''
     return fetchWithAuth(`/carteira/${companyId}${q}`)
   },
 
@@ -384,6 +451,72 @@ export const carteiraApi = {
   },
 }
 
+// --------------- Opportunities ---------------
+
+export const opportunitiesApi = {
+  async generateMessage(
+    opportunityId: string,
+    customerHash: string,
+    dateRange: string = '1m'
+  ): Promise<ApiResponse<GenerateMessageResponse>> {
+    return fetchWithAuth(`/opportunities/${opportunityId}/generate-message`, {
+      method: 'POST',
+      body: JSON.stringify({ customer_hash: customerHash, date_range: dateRange }),
+    })
+  },
+}
+
+// --------------- Outreach (disparo ao cliente final) ---------------
+
+export const outreachApi = {
+  async getConfig(): Promise<ApiResponse<OutreachConfig>> {
+    return fetchWithAuth('/outreach/config')
+  },
+  async updateConfig(data: Partial<OutreachConfig>): Promise<ApiResponse<OutreachConfig>> {
+    // converte camelCase do front → snake_case esperado pelo backend
+    const body: Record<string, unknown> = {}
+    if (data.autoSendEnabled !== undefined) body.auto_send_enabled = data.autoSendEnabled
+    if (data.whatsappEnabled !== undefined) body.whatsapp_enabled = data.whatsappEnabled
+    if (data.emailEnabled !== undefined) body.email_enabled = data.emailEnabled
+    if (data.senderName !== undefined) body.sender_name = data.senderName
+    if (data.replyToEmail !== undefined) body.reply_to_email = data.replyToEmail
+    if (data.sendHour !== undefined) body.send_hour = data.sendHour
+    if (data.minOpportunityValue !== undefined) body.min_opportunity_value = data.minOpportunityValue
+    if (data.dailyLimit !== undefined) body.daily_limit = data.dailyLimit
+    if (data.cadenceEnabled !== undefined) body.cadence_enabled = data.cadenceEnabled
+    return fetchWithAuth('/outreach/config', { method: 'PATCH', body: JSON.stringify(body) })
+  },
+  async connectWhatsapp(): Promise<ApiResponse<{ qrcode: string | null }>> {
+    return fetchWithAuth('/outreach/whatsapp/connect', { method: 'POST' })
+  },
+  async whatsappStatus(): Promise<ApiResponse<{ status: string; whatsappNumber?: string | null }>> {
+    return fetchWithAuth('/outreach/whatsapp/status')
+  },
+  async disconnectWhatsapp(): Promise<ApiResponse<OutreachConfig>> {
+    return fetchWithAuth('/outreach/whatsapp/disconnect', { method: 'POST' })
+  },
+  async listContacts(): Promise<ApiResponse<OutreachContact[]>> {
+    return fetchWithAuth('/outreach/contacts')
+  },
+  async updateContact(
+    customerHash: string,
+    data: { phone?: string | null; email?: string | null; contact_opt_out?: boolean }
+  ): Promise<ApiResponse<{ customerHash: string }>> {
+    return fetchWithAuth(`/outreach/contacts/${customerHash}`, {
+      method: 'PATCH', body: JSON.stringify(data),
+    })
+  },
+  async previewMessage(): Promise<ApiResponse<{ message: string | null; customerName: string | null; aiEnabled?: boolean; reason?: string }>> {
+    return fetchWithAuth('/outreach/preview')
+  },
+  async sendNow(): Promise<ApiResponse<{ queued: boolean; message: string }>> {
+    return fetchWithAuth('/outreach/send-now', { method: 'POST' })
+  },
+  async getRecovery(): Promise<ApiResponse<RecoverySummary>> {
+    return fetchWithAuth('/outreach/recovery')
+  },
+}
+
 // --------------- Export agregado ---------------
 
 export const api = {
@@ -398,6 +531,8 @@ export const api = {
   integrations: integrationsApi,
   notifications: notificationsApi,
   carteira: carteiraApi,
+  opportunities: opportunitiesApi,
+  outreach: outreachApi,
 }
 
 export default api

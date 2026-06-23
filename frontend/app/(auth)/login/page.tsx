@@ -19,8 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Activity } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -50,14 +49,14 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-[80vh] w-full flex-col items-center justify-center relative">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/15 via-background to-background" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/[0.06] via-background to-background" />
 
-      <Card className="w-full max-w-[400px] border-border/40 bg-background/95 shadow-2xl backdrop-blur-xl sm:rounded-2xl">
+      <Card className="w-full max-w-[400px] shadow-sm sm:rounded-2xl">
         <CardHeader className="space-y-3 pb-6 pt-8 text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <Activity className="h-6 w-6 text-primary" aria-hidden="true" />
+            <Radar className="h-6 w-6 text-primary" aria-hidden="true" />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
+          <CardTitle className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">
             Bem-vindo de volta
           </CardTitle>
           <CardDescription className="text-base font-medium text-muted-foreground/80">
@@ -175,10 +174,7 @@ export default function LoginPage() {
 
             <Button
               type="submit"
-              className={cn(
-                'h-11 w-full text-base font-semibold transition-all duration-300',
-                !isLoading && 'hover:shadow-md hover:shadow-primary/20'
-              )}
+              className="h-11 w-full text-base font-semibold transition-colors"
               disabled={isLoading}
               aria-busy={isLoading}
             >

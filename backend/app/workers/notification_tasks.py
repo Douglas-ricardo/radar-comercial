@@ -50,7 +50,7 @@ def send_daily_notifications(self):
 
                 opportunities = [
                     opp for opp in insights.opportunities
-                    if opp.get("expected_value", 0) >= pref.min_opportunity_value
+                    if opp.get("expectedValue", 0) >= pref.min_opportunity_value
                 ]
 
                 if not opportunities:

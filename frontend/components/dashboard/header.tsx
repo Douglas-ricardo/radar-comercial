@@ -12,8 +12,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Bell, LogOut, Settings, User, Building2, Search, CreditCard } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { Bell, LogOut, Settings, User, Building2, Search, CreditCard, Upload } from 'lucide-react'
+import Link from 'next/link'
 import {
   Popover,
   PopoverContent,
@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/popover'
 import { useRouter } from 'next/navigation'
 import { getInitials } from '@/lib/utils'
-import { useState, useRef } from 'react'
+import { CommandMenuTrigger } from '@/components/dashboard/command-menu'
 
 interface DashboardHeaderProps {
   title?: string
@@ -39,18 +39,6 @@ interface Notification {
 
 const NOTIFICATIONS: Notification[] = []
 
-const SEARCH_LINKS = [
-  { label: 'Dashboard', href: '/dashboard' },
-  { label: 'Importar dados (Upload)', href: '/dashboard/upload' },
-  { label: 'Insights e oportunidades', href: '/dashboard/insights' },
-  { label: 'Carteira ativa', href: '/dashboard/carteira' },
-  { label: 'Histórico de análises', href: '/dashboard/history' },
-  { label: 'Equipe', href: '/dashboard/team' },
-  { label: 'Integrações e API Keys', href: '/dashboard/integrations' },
-  { label: 'Plano e faturamento', href: '/dashboard/billing' },
-  { label: 'Configurações', href: '/dashboard/settings' },
-]
-
 const PLAN_LABELS: Record<string, string> = {
   free: 'Gratuito',
   pro: 'Profissional',
@@ -60,23 +48,8 @@ const PLAN_LABELS: Record<string, string> = {
 export function DashboardHeader({ title, description }: DashboardHeaderProps) {
   const { user, company, logout } = useAuth()
   const router = useRouter()
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
-  const searchRef = useRef<HTMLInputElement>(null)
 
   const unreadCount = NOTIFICATIONS.filter((n) => n.unread).length
-
-  const filteredLinks = searchQuery.length > 0
-    ? SEARCH_LINKS.filter((l) =>
-        l.label.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : []
-
-  function handleSearchSelect(href: string) {
-    setSearchQuery('')
-    setSearchOpen(false)
-    router.push(href)
-  }
 
   return (
     <header
@@ -94,53 +67,37 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
       {/* Título da página */}
       <div className="min-w-0 flex-1">
         {title && (
-          <h1 className="truncate text-xl font-semibold text-foreground">{title}</h1>
+          <h1 className="truncate font-serif text-xl tracking-[-0.01em] text-foreground">{title}</h1>
         )}
         {description && (
           <p className="truncate text-sm text-muted-foreground">{description}</p>
         )}
       </div>
 
-      {/* Busca — centro, apenas desktop */}
-      <div className="hidden max-w-md flex-1 lg:block">
-        <div className="relative">
-          <Search
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            ref={searchRef}
-            placeholder="Buscar páginas..."
-            className="h-9 w-full border-border bg-secondary/50 pl-9 transition-colors focus:bg-background"
-            aria-label="Busca de páginas"
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true) }}
-            onFocus={() => setSearchOpen(true)}
-            onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
-          />
-          {searchOpen && filteredLinks.length > 0 && (
-            <div className="absolute top-full left-0 mt-1 w-full rounded-md border border-border bg-popover shadow-lg z-50">
-              {filteredLinks.map((link) => (
-                <button
-                  key={link.href}
-                  type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent text-left"
-                  onMouseDown={() => handleSearchSelect(link.href)}
-                >
-                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {link.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* ⌘K — centro, apenas desktop */}
+      <div className="hidden flex-1 justify-center lg:flex">
+        <CommandMenuTrigger />
       </div>
 
       {/* Ações à direita */}
       <div className="flex items-center gap-2">
-        {/* Busca mobile */}
-        <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Abrir busca">
+        {/* Busca mobile (⌘K) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          aria-label="Abrir busca"
+          onClick={() => document.dispatchEvent(new CustomEvent('open-command-menu'))}
+        >
           <Search className="h-5 w-5" aria-hidden="true" />
+        </Button>
+
+        {/* Importar — ação primária */}
+        <Button asChild size="sm" className="hidden h-9 gap-2 sm:inline-flex">
+          <Link href="/dashboard/upload">
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            Importar
+          </Link>
         </Button>
 
         {/* Notificações */}
@@ -257,10 +214,12 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
                 </p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/dashboard/billing')}>
-                <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
-                Plano e faturamento
-              </DropdownMenuItem>
+              {user?.role === 'admin' && (
+                <DropdownMenuItem onClick={() => router.push('/dashboard/billing')}>
+                  <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Plano e faturamento
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                 <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                 Configurações da empresa
@@ -278,7 +237,7 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
               aria-label={`Menu do usuário: ${user?.name ?? 'Usuário'}`}
             >
               <Avatar className="h-9 w-9">
-                <AvatarFallback className="bg-gradient-to-br from-primary to-primary/70 text-sm font-semibold text-primary-foreground">
+                <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">
                   {user ? getInitials(user.name) : 'U'}
                 </AvatarFallback>
               </Avatar>

@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 from app.infrastructure.database import get_db_session
 from app.infrastructure.redis_client import redis_client
 from app.domain.models import User, Company
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    validate_password_strength,
+)
 from app.core.auth import get_current_user_and_company
 from app.core.rate_limit import limiter
 from app.services.plan_service import PlanService
@@ -53,6 +58,10 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+
 _RESET_TOKEN_TTL = 60 * 30  # 30 minutos
 _RESET_KEY_PREFIX = "pwd_reset:"
 
@@ -70,7 +79,11 @@ def _build_auth_response(token: str, user: User, company: Company) -> dict:
             "name": user.name,
             "email": user.email,
             "role": user.role,
+            "scope": user.scope,
+            "status": user.status,
             "companyId": company.id,
+            "createdAt": user.created_at.isoformat() if user.created_at else None,
+            "updatedAt": user.updated_at.isoformat() if user.updated_at else None,
         },
         "company": {
             "id": company.id,
@@ -78,6 +91,9 @@ def _build_auth_response(token: str, user: User, company: Company) -> dict:
             "plan": company.plan,
             "uploadsLimit": company.uploads_limit,
             "uploadsUsed": company.uploads_used,
+            "ownerId": company.owner_id,
+            "createdAt": company.created_at.isoformat() if company.created_at else None,
+            "updatedAt": company.updated_at.isoformat() if company.updated_at else None,
         },
     }
 
@@ -85,7 +101,13 @@ def _build_auth_response(token: str, user: User, company: Company) -> dict:
 @router.post("/signup")
 @limiter.limit("5/minute")
 def signup(request: Request, data: SignupRequest, response: Response, db: Session = Depends(get_db_session)):
-    if db.query(User).filter(User.email == data.email).first():
+    email = data.email.strip().lower()
+
+    pwd_error = validate_password_strength(data.password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
+
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Este email já está registado.")
 
     new_company = Company(
@@ -99,7 +121,7 @@ def signup(request: Request, data: SignupRequest, response: Response, db: Sessio
     db.refresh(new_company)
 
     new_user = User(
-        email=data.email,
+        email=email,
         name=data.name,
         hashed_password=get_password_hash(data.password),
         role="admin",
@@ -109,9 +131,19 @@ def signup(request: Request, data: SignupRequest, response: Response, db: Sessio
     db.commit()
     db.refresh(new_user)
 
+    # Fundador = primeiro admin. Preenche owner_id (contrato types/index.ts).
+    new_company.owner_id = new_user.id
+    db.commit()
+
     logger.info("auth.signup", extra={"company_id": new_company.id, "user_id": new_user.id})
 
-    token_data = {"sub": new_user.id, "company_id": new_company.id, "role": new_user.role}
+    token_data = {
+        "sub": new_user.id,
+        "company_id": new_company.id,
+        "role": new_user.role,
+        "scope": new_user.scope,
+        "cv": new_user.credential_version or 0,
+    }
     access_token = create_access_token(data=token_data)
 
     response.set_cookie(
@@ -129,7 +161,7 @@ def signup(request: Request, data: SignupRequest, response: Response, db: Sessio
 @router.post("/login")
 @limiter.limit("10/minute")
 def login(request: Request, data: LoginRequest, response: Response, db: Session = Depends(get_db_session)):
-    user = db.query(User).filter(User.email == data.email).first()
+    user = db.query(User).filter(User.email == data.email.strip().lower()).first()
 
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(
@@ -147,7 +179,13 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
 
     logger.info("auth.login", extra={"user_id": user.id, "company_id": company.id})
 
-    token_data = {"sub": user.id, "company_id": company.id, "role": user.role}
+    token_data = {
+        "sub": user.id,
+        "company_id": company.id,
+        "role": user.role,
+        "scope": user.scope,
+        "cv": user.credential_version or 0,
+    }
     access_token = create_access_token(data=token_data)
 
     # Adiciona o Cookie na resposta
@@ -160,7 +198,9 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
         max_age=60 * 60 * 24 * 7,
     )
 
-    return {"success": True, "data": _build_auth_response(access_token, user, company)}
+    auth_data = _build_auth_response(access_token, user, company)
+    auth_data["requiresPasswordChange"] = (user.status == "pending")
+    return {"success": True, "data": auth_data}
 
 
 @router.get("/me")
@@ -191,6 +231,7 @@ def logout(response: Response):
 def change_password(
     request: Request,
     data: ChangePasswordRequest,
+    response: Response,
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
 ):
@@ -202,11 +243,9 @@ def change_password(
         logger.warning("auth.change_password.invalid_current", extra={"user_id": user.id})
         raise HTTPException(status_code=400, detail="Senha atual incorreta.")
 
-    if len(data.new_password) < 8:
-        raise HTTPException(
-            status_code=400,
-            detail="A nova senha deve ter no mínimo 8 caracteres.",
-        )
+    pwd_error = validate_password_strength(data.new_password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
 
     if data.current_password == data.new_password:
         raise HTTPException(
@@ -215,7 +254,26 @@ def change_password(
         )
 
     user.hashed_password = get_password_hash(data.new_password)
+    # Invalida todos os JWTs emitidos antes desta troca.
+    user.credential_version = (user.credential_version or 0) + 1
     db.commit()
+
+    # Reemite o cookie da sessão atual com o novo cv para o usuário não cair.
+    new_token = create_access_token(data={
+        "sub": user.id,
+        "company_id": user.company_id,
+        "role": user.role,
+        "scope": user.scope,
+        "cv": user.credential_version,
+    })
+    response.set_cookie(
+        key="radar_session",
+        value=new_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+    )
 
     logger.info("auth.change_password.success", extra={"user_id": user.id})
     return {"success": True}
@@ -279,8 +337,9 @@ def reset_password(
     data: ResetPasswordRequest,
     db: Session = Depends(get_db_session),
 ):
-    if len(data.new_password) < 8:
-        raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 8 caracteres.")
+    pwd_error = validate_password_strength(data.new_password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
 
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
     redis_key = f"{_RESET_KEY_PREFIX}{token_hash}"
@@ -301,6 +360,8 @@ def reset_password(
         raise HTTPException(status_code=400, detail="Token inválido.")
 
     user.hashed_password = get_password_hash(data.new_password)
+    # Invalida sessões antigas após reset.
+    user.credential_version = (user.credential_version or 0) + 1
     db.commit()
 
     try:
@@ -310,3 +371,52 @@ def reset_password(
 
     logger.info("auth.reset_password.success", extra={"user_id": user.id})
     return {"success": True, "message": "Senha redefinida com sucesso."}
+
+
+@router.post("/set-password")
+@limiter.limit("5/minute")
+def set_password(
+    request: Request,
+    data: SetPasswordRequest,
+    response: Response,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Troca a senha temporária de um usuário convidado (status=pending) e ativa a conta."""
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+
+    if user.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Conta já ativada. Use 'alterar senha' nas configurações.",
+        )
+
+    pwd_error = validate_password_strength(data.new_password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
+
+    user.hashed_password = get_password_hash(data.new_password)
+    user.status = "active"
+    user.credential_version = (user.credential_version or 0) + 1
+    db.commit()
+
+    new_token = create_access_token(data={
+        "sub": user.id,
+        "company_id": user.company_id,
+        "role": user.role,
+        "scope": user.scope,
+        "cv": user.credential_version,
+    })
+    response.set_cookie(
+        key="radar_session",
+        value=new_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+    )
+
+    logger.info("auth.set_password.success", extra={"user_id": user.id})
+    return {"success": True}

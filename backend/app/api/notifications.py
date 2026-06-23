@@ -139,7 +139,7 @@ def test_send(
     if not any(results.values()):
         return {
             "success": False,
-            "message": "Nenhuma notificação enviada. Verifique RESEND_API_KEY / TWILIO_*.",
+            "message": "Nenhuma notificação enviada. Verifique RESEND_API_KEY e WHATSAPP_API_TOKEN / WHATSAPP_PHONE_NUMBER_ID no .env.",
             "data": results,
         }
 

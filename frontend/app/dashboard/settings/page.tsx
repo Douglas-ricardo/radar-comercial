@@ -27,6 +27,8 @@ import type { NotificationPreference } from '@/types'
 export default function SettingsPage() {
   const { user, company, updateUser, updateCompany } = useAuth()
   const router = useRouter()
+  const isAdmin = user?.role === 'admin'
+  const canManageNotif = user?.role === 'admin' || user?.role === 'analyst'
 
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [isSavingCompany, setIsSavingCompany] = useState(false)
@@ -156,32 +158,38 @@ export default function SettingsPage() {
         title="Configurações"
         description="Gerencie sua conta e preferências do Radar"
       />
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-6 lg:p-8">
         <Tabs defaultValue="profile" className="space-y-6">
           <TabsList>
             <TabsTrigger value="profile" className="gap-2">
               <User className="h-4 w-4" aria-hidden="true" />
               Perfil
             </TabsTrigger>
-            <TabsTrigger value="company" className="gap-2">
-              <Building2 className="h-4 w-4" aria-hidden="true" />
-              Empresa
-            </TabsTrigger>
-            <TabsTrigger value="notifications" className="gap-2">
-              <Bell className="h-4 w-4" aria-hidden="true" />
-              Notificações
-            </TabsTrigger>
-            <TabsTrigger value="billing" className="gap-2">
-              <CreditCard className="h-4 w-4" aria-hidden="true" />
-              Plano
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="company" className="gap-2">
+                <Building2 className="h-4 w-4" aria-hidden="true" />
+                Empresa
+              </TabsTrigger>
+            )}
+            {canManageNotif && (
+              <TabsTrigger value="notifications" className="gap-2">
+                <Bell className="h-4 w-4" aria-hidden="true" />
+                Notificações
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="billing" className="gap-2">
+                <CreditCard className="h-4 w-4" aria-hidden="true" />
+                Plano
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* Aba Perfil */}
-          <TabsContent value="profile">
-            <Card>
+          <TabsContent value="profile" className="space-y-6">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
-                <CardTitle>Perfil pessoal</CardTitle>
+                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Perfil pessoal</CardTitle>
                 <CardDescription>Como os outros membros te identificam</CardDescription>
               </CardHeader>
               <CardContent>
@@ -222,10 +230,12 @@ export default function SettingsPage() {
               </CardFooter>
             </Card>
 
-            <Card className="mt-6">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Lock className="h-4 w-4" aria-hidden="true" />
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                    <Lock className="h-4 w-4 text-primary" aria-hidden="true" />
+                  </span>
                   Alterar senha
                 </CardTitle>
                 <CardDescription>
@@ -287,7 +297,10 @@ export default function SettingsPage() {
                   </Field>
                 </FieldGroup>
               </CardContent>
-              <CardFooter className="border-t pt-6">
+              <CardFooter className="flex items-center justify-between gap-4 border-t pt-6">
+                <p className="text-xs text-muted-foreground">
+                  Ao alterar a senha, suas outras sessões serão encerradas.
+                </p>
                 <Button
                   onClick={handleChangePassword}
                   disabled={!canSubmitPassword || isChangingPassword}
@@ -302,11 +315,11 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          {/* Aba Empresa */}
-          <TabsContent value="company">
-            <Card>
+          {/* Aba Empresa — admin only */}
+          {isAdmin && <TabsContent value="company">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
-                <CardTitle>Dados da empresa</CardTitle>
+                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Dados da empresa</CardTitle>
                 <CardDescription>Informações para relatórios e faturamento</CardDescription>
               </CardHeader>
               <CardContent>
@@ -350,21 +363,26 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
-          </TabsContent>
+          </TabsContent>}
 
-          {/* Aba Notificações */}
-          <TabsContent value="notifications">
-            <Card>
+          {/* Aba Notificações — admin e analista (digest por usuário) */}
+          {canManageNotif && <TabsContent value="notifications">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
-                <CardTitle>Notificações diárias</CardTitle>
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                    <Bell className="h-4 w-4 text-primary" aria-hidden="true" />
+                  </span>
+                  Notificações diárias
+                </CardTitle>
                 <CardDescription>
                   Receba um resumo de oportunidades todo dia às {notifPrefs.sendHour}h (horário de Brasília)
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex items-center justify-between">
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
                   <div>
-                    <p className="font-medium text-sm">Ativar notificações</p>
+                    <p className="text-sm font-medium text-foreground">Ativar notificações</p>
                     <p className="text-xs text-muted-foreground">Habilita o envio do resumo diário</p>
                   </div>
                   <Switch
@@ -373,9 +391,9 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
                   <div>
-                    <p className="font-medium text-sm">Email</p>
+                    <p className="text-sm font-medium text-foreground">Email</p>
                     <p className="text-xs text-muted-foreground">Enviar para {user?.email}</p>
                   </div>
                   <Switch
@@ -385,10 +403,10 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
                   <div>
-                    <p className="font-medium text-sm">WhatsApp</p>
-                    <p className="text-xs text-muted-foreground">Requer TWILIO configurado</p>
+                    <p className="text-sm font-medium text-foreground">WhatsApp</p>
+                    <p className="text-xs text-muted-foreground">Requer WhatsApp Cloud API configurado</p>
                   </div>
                   <Switch
                     checked={notifPrefs.whatsappEnabled}
@@ -465,42 +483,51 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
-          </TabsContent>
+          </TabsContent>}
 
-          {/* Aba Plano */}
-          <TabsContent value="billing">
-            <Card>
+          {/* Aba Plano — admin only */}
+          {isAdmin && <TabsContent value="billing">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
-                <CardTitle>Plano e faturamento</CardTitle>
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                    <CreditCard className="h-4 w-4 text-primary" aria-hidden="true" />
+                  </span>
+                  Plano e faturamento
+                </CardTitle>
                 <CardDescription>
-                  Gerencie sua assinatura e histórico de pagamentos
+                  Resumo do plano — upgrades e cobrança ficam na página de faturamento
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="rounded-lg border border-border p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">
+                <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary bg-accent/40 p-5">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground">
                       Plano{' '}
                       {company?.plan
                         ? company.plan.charAt(0).toUpperCase() + company.plan.slice(1)
                         : '—'}
                     </p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {company?.uploadsUsed ?? 0} de {company?.uploadsLimit ?? 0} uploads
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      <span className="tabular-nums">{company?.uploadsUsed ?? 0}</span> de{' '}
+                      <span className="tabular-nums">{company?.uploadsLimit ?? 0}</span> uploads
                       utilizados este mês
                     </p>
                   </div>
                   <Button
-                    variant="outline"
                     size="sm"
+                    className="shrink-0"
                     onClick={() => router.push('/dashboard/billing')}
                   >
-                    Gerenciar plano
+                    Gerenciar plano e faturamento
                   </Button>
                 </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Upgrades, downgrades e detalhes de cobrança ficam na página de faturamento.
+                </p>
               </CardContent>
             </Card>
-          </TabsContent>
+          </TabsContent>}
         </Tabs>
       </div>
     </div>

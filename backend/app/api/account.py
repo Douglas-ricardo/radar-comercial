@@ -56,7 +56,10 @@ def update_user(
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            "status": user.status,
             "companyId": user.company_id,
+            "createdAt": user.created_at.isoformat() if user.created_at else None,
+            "updatedAt": user.updated_at.isoformat() if user.updated_at else None,
         },
     }
 
@@ -100,5 +103,8 @@ def update_company(
             "plan": company.plan,
             "uploadsLimit": company.uploads_limit,
             "uploadsUsed": company.uploads_used,
+            "ownerId": company.owner_id,
+            "createdAt": company.created_at.isoformat() if company.created_at else None,
+            "updatedAt": company.updated_at.isoformat() if company.updated_at else None,
         },
     }

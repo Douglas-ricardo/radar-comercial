@@ -18,6 +18,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
 import { CheckCircle, Building2, Users, Zap, Crown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PLAN_LIST, type PlanId } from '@/lib/plans'
 import { toast } from 'sonner'
 
 type Step = 'company' | 'industry' | 'plan'
@@ -37,51 +38,10 @@ const industries = [
 
 const employeeCounts = ['1-10', '11-50', '51-200', '201-500', '500+']
 
-const plans = [
-  {
-    id: 'free' as const,
-    name: 'Gratuito',
-    price: 'R$ 0',
-    period: '/mês',
-    description: 'Para começar a explorar',
-    features: ['5 uploads/mês', 'Análise básica', '1 usuário', 'Suporte por email'],
-    icon: Zap,
-    popular: false,
-  },
-  {
-    id: 'pro' as const,
-    name: 'Profissional',
-    price: 'R$ 199',
-    period: '/mês',
-    description: 'Para times em crescimento',
-    features: [
-      '50 uploads/mês',
-      'Análise avançada',
-      'Até 10 usuários',
-      'Suporte prioritário',
-      'Exportação PDF',
-    ],
-    icon: Users,
-    popular: true,
-  },
-  {
-    id: 'enterprise' as const,
-    name: 'Enterprise',
-    price: 'Personalizado',
-    period: '',
-    description: 'Para grandes operações',
-    features: [
-      'Uploads ilimitados',
-      'Análise customizada',
-      'Usuários ilimitados',
-      'Suporte dedicado',
-      'API access',
-      'SSO',
-    ],
-    icon: Crown,
-    popular: false,
-  },
-]
+const PLAN_ICONS: Record<PlanId, typeof Zap> = { free: Zap, pro: Users, enterprise: Crown }
+
+// Planos vêm da fonte única (lib/plans.ts); ícone é só apresentação.
+const plans = PLAN_LIST.map((p) => ({ ...p, icon: PLAN_ICONS[p.id] }))
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<Step>('company')
@@ -219,7 +179,7 @@ export default function OnboardingPage() {
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Building2 className="h-6 w-6 text-primary" aria-hidden="true" />
             </div>
-            <CardTitle className="text-2xl">Sobre sua empresa</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Sobre sua empresa</CardTitle>
             <CardDescription>
               Conte-nos um pouco sobre sua empresa para personalizar sua experiência
             </CardDescription>
@@ -264,7 +224,7 @@ export default function OnboardingPage() {
       {step === 'industry' && (
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Setor e tamanho</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Setor e tamanho</CardTitle>
             <CardDescription>
               Isso nos ajuda a otimizar as análises para seu tipo de negócio
             </CardDescription>
@@ -334,7 +294,7 @@ export default function OnboardingPage() {
       {step === 'plan' && (
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Escolha seu plano</CardTitle>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Escolha seu plano</CardTitle>
             <CardDescription>Você pode alterar seu plano a qualquer momento</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -361,9 +321,9 @@ export default function OnboardingPage() {
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
                     <plan.icon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                   </div>
-                  <h3 className="font-semibold">{plan.name}</h3>
+                  <h3 className="font-serif text-base font-medium">{plan.name}</h3>
                   <div className="mt-1">
-                    <span className="text-2xl font-bold">{plan.price}</span>
+                    <span className="font-serif text-2xl tabular-nums">{plan.price}</span>
                     <span className="text-sm text-muted-foreground">{plan.period}</span>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{plan.description}</p>

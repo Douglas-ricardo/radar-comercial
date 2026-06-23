@@ -1,8 +1,3 @@
-// lib/format.ts
-export function formatCurrency(value: number | undefined | null): string {
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    minimumFractionDigits: 0,
-  }).format(value ?? 0)
-}
+// lib/format.ts — re-exporta de utils para manter UMA única implementação de
+// formatCurrency. Importadores existentes (@/lib/format) continuam válidos.
+export { formatCurrency } from './utils'

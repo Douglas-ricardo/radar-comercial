@@ -20,6 +20,11 @@ export function ProtectedRoute({ children, requiredRoles }: ProtectedRouteProps)
       router.push('/login')
       return
     }
+    // Usuário convidado com senha temporária precisa trocá-la antes de qualquer página
+    if (user && user.status === 'pending') {
+      router.push('/set-password')
+      return
+    }
     if (requiredRoles && user && !requiredRoles.includes(user.role)) {
       router.push('/dashboard')
     }
@@ -37,6 +42,8 @@ export function ProtectedRoute({ children, requiredRoles }: ProtectedRouteProps)
   }
 
   if (!isAuthenticated) return null
+
+  if (user && user.status === 'pending') return null
 
   if (requiredRoles && user && !requiredRoles.includes(user.role)) return null
 

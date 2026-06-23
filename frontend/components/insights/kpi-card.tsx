@@ -21,8 +21,8 @@ export function KpiCard({ label, value, delta, icon, variant = 'default' }: KpiC
   return (
     <Card
       className={cn(
-        'transition-all hover:shadow-sm',
-        variant === 'danger' && 'border-destructive/20'
+        'transition-colors hover:border-primary/30',
+        variant === 'danger' && 'border-destructive/30 bg-destructive/[0.03]'
       )}
     >
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
@@ -36,8 +36,8 @@ export function KpiCard({ label, value, delta, icon, variant = 'default' }: KpiC
       <CardContent className="space-y-1">
         <p
           className={cn(
-            'text-2xl font-semibold tracking-tight',
-            variant === 'danger' && 'text-destructive'
+            'font-mono text-2xl leading-none tracking-tight tabular-nums',
+            variant === 'danger' ? 'text-destructive' : 'text-foreground'
           )}
           aria-label={`${label}: ${value}`}
         >

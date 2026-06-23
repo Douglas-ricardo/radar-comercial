@@ -1,0 +1,65 @@
+{
+  "name": "Radar — ERP → Ingest (genérico)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] }
+      },
+      "id": "schedule-1",
+      "name": "Schedule (a cada 6h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://API-DO-SEU-ERP/vendas",
+        "options": {}
+      },
+      "id": "erp-fetch",
+      "name": "ERP — buscar vendas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "notes": "Configure a credencial/URL do ERP (Omie/Bling/Conta Azul). Veja n8n-erp.md."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mapeia o JSON do ERP para o contrato do Radar.\n// Ajuste os caminhos conforme o ERP (ver n8n-erp.md).\nconst rows = [];\nfor (const item of $input.all()) {\n  const v = item.json;\n  // EXEMPLO genérico — troque pelos campos reais do seu ERP:\n  rows.push({\n    data: v.data || v.emission || v.dataEmissao,\n    cliente: v.cliente || v.customer?.name || v.contato?.nome,\n    produto: v.produto || v.item?.descricao || v.description,\n    quantidade: Number(v.quantidade || v.quantity || 1),\n    valor: Number(v.valor || v.value || v.valor_total || 0),\n    telefone: v.telefone || v.contato?.telefone || undefined,\n    email: v.email || v.contato?.email || undefined,\n  });\n}\nreturn [{ json: { rows } }];"
+      },
+      "id": "map-1",
+      "name": "Mapear p/ contrato Radar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_BASE_URL }}/api/data/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-API-Key", "value": "={{ $env.RADAR_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.rows) }}",
+        "options": {}
+      },
+      "id": "radar-ingest",
+      "name": "Radar — ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300],
+      "notes": "Defina APP_BASE_URL e RADAR_API_KEY como variáveis de ambiente do n8n."
+    }
+  ],
+  "connections": {
+    "Schedule (a cada 6h)": { "main": [[{ "node": "ERP — buscar vendas", "type": "main", "index": 0 }]] },
+    "ERP — buscar vendas": { "main": [[{ "node": "Mapear p/ contrato Radar", "type": "main", "index": 0 }]] },
+    "Mapear p/ contrato Radar": { "main": [[{ "node": "Radar — ingest", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

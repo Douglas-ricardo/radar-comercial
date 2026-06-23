@@ -64,7 +64,7 @@ export function UploadStepper({ status }: UploadStepperProps) {
                     isError
                       ? 'border-destructive bg-destructive/10 text-destructive'
                       : isCompleted
-                      ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                      ? 'border-primary bg-primary text-primary-foreground'
                       : isCurrent
                       ? 'border-primary bg-background text-primary ring-4 ring-primary/10'
                       : 'border-muted bg-background text-muted-foreground'
