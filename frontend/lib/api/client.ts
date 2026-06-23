@@ -29,6 +29,9 @@ import type {
   OutreachContact,
   RecoverySummary,
   ChurnRiskData,
+  GerencialData,
+  WebhookConfig,
+  WebhookDelivery,
 } from '@/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
@@ -449,6 +452,10 @@ export const carteiraApi = {
   async getRanking(companyId: string): Promise<ApiResponse<RankingEntry[]>> {
     return fetchWithAuth(`/carteira/${companyId}/ranking`)
   },
+
+  async getGerencial(companyId: string): Promise<ApiResponse<GerencialData>> {
+    return fetchWithAuth(`/carteira/${companyId}/gerencial`)
+  },
 }
 
 // --------------- Opportunities ---------------
@@ -517,6 +524,49 @@ export const outreachApi = {
   },
 }
 
+// --------------- Reports ---------------
+
+export const reportsApi = {
+  excelUrl(
+    companyId: string,
+    params?: { dateRange?: string; branch?: string; salesperson?: string }
+  ): string {
+    const p = new URLSearchParams()
+    if (params?.dateRange) p.set('date_range', params.dateRange)
+    if (params?.branch) p.set('branch', params.branch)
+    if (params?.salesperson) p.set('salesperson', params.salesperson)
+    const q = p.size ? `?${p.toString()}` : ''
+    return `${API_BASE_URL}/reports/${companyId}/excel${q}`
+  },
+}
+
+// --------------- Webhooks ---------------
+
+export const webhooksApi = {
+  async list(): Promise<ApiResponse<WebhookConfig[]>> {
+    return fetchWithAuth('/integrations/webhooks')
+  },
+
+  async create(data: { targetUrl: string; events: string[] }): Promise<ApiResponse<WebhookConfig & { secret: string }>> {
+    return fetchWithAuth('/integrations/webhooks', {
+      method: 'POST',
+      body: JSON.stringify({ target_url: data.targetUrl, events: data.events }),
+    })
+  },
+
+  async remove(webhookId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/integrations/webhooks/${webhookId}`, { method: 'DELETE' })
+  },
+
+  async test(webhookId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/integrations/webhooks/${webhookId}/test`, { method: 'POST' })
+  },
+
+  async listDeliveries(): Promise<ApiResponse<WebhookDelivery[]>> {
+    return fetchWithAuth('/integrations/webhooks/deliveries')
+  },
+}
+
 // --------------- Export agregado ---------------
 
 export const api = {
@@ -533,6 +583,8 @@ export const api = {
   carteira: carteiraApi,
   opportunities: opportunitiesApi,
   outreach: outreachApi,
+  reports: reportsApi,
+  webhooks: webhooksApi,
 }
 
 export default api

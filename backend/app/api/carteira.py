@@ -133,6 +133,8 @@ def upsert_action(
         opportunity_id=data.opportunity_id,
     ).first()
 
+    previous_status = existing.status if existing else None
+
     if existing:
         existing.status = data.status
         existing.notes = data.notes
@@ -155,6 +157,20 @@ def upsert_action(
         "opportunity_id": data.opportunity_id,
         "status": data.status,
     })
+
+    # Disparo assíncrono de webhook de saída (não bloqueia resposta).
+    try:
+        from app.services.webhook_service import dispatch_webhook
+        dispatch_webhook(db, company_id, "opportunity.updated", {
+            "opportunity_id": data.opportunity_id,
+            "customer_name": data.customer_name,
+            "previous_status": previous_status,
+            "new_status": data.status,
+            "expected_value": data.expected_value,
+        })
+    except Exception as exc:
+        logger.warning("carteira.webhook.dispatch_error", extra={"company_id": company_id, "error": str(exc)})
+
     return {"success": True, "message": "Ação registrada com sucesso."}
 
 
@@ -213,3 +229,124 @@ def get_ranking(
         ranking = [r for r in ranking if r["userId"] == token_data.user_id]
 
     return {"success": True, "data": ranking}
+
+
+@router.get("/{company_id}/gerencial")
+def get_gerencial(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Visão gerencial agregada por filial e por vendedor.
+    Admin vê tudo; analyst com scope=branch:X vê só a própria filial.
+    """
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    # Determinar filtro de filial pelo scope do token (mesmo mecanismo do /carteira)
+    effective_branch: str | None = None
+    if token_data.scope and token_data.role != "admin":
+        parts = token_data.scope.split(":", 1)
+        if parts[0] == "branch" and len(parts) == 2:
+            effective_branch = parts[1]
+
+    # Carregar oportunidades do ComputedInsights
+    insights = None
+    for dr in ("1m", "3m", "6m", "12m"):
+        candidate = db.query(ComputedInsights).filter_by(
+            company_id=company_id, date_range=dr
+        ).first()
+        if candidate and candidate.opportunities:
+            insights = candidate
+            break
+    raw_opps = insights.opportunities if insights else []
+    if not raw_opps:
+        return {"success": True, "data": {"by_branch": [], "by_salesperson": [], "totals": {}}}
+
+    # Batch-join: customer_hash → (branch, salesperson) via CustomerProfile
+    hashes = [opp.get("customerHash", opp.get("id", "")) for opp in raw_opps]
+    q = db.query(
+        CustomerProfile.customer_hash,
+        CustomerProfile.branch,
+        CustomerProfile.salesperson,
+    ).filter(
+        CustomerProfile.company_id == company_id,
+        CustomerProfile.customer_hash.in_(hashes),
+    )
+    if effective_branch:
+        q = q.filter(CustomerProfile.branch == effective_branch)
+    profile_map = {row[0]: {"branch": row[1], "salesperson": row[2]} for row in q.all()}
+
+    # Carregar todas as ações da empresa para mapear status por opp_id
+    actions = db.query(OpportunityAction).filter_by(company_id=company_id).all()
+    # Agrega por opp_id: último status registrado (qualquer usuário) — vence mais recente
+    action_status: dict = {}
+    action_value: dict = {}
+    for a in actions:
+        action_status[a.opportunity_id] = a.status
+        action_value[a.opportunity_id] = a.expected_value or 0.0
+
+    def _empty_bucket():
+        return {"total_opportunities": 0, "total_value": 0.0,
+                "to_contact": 0, "contacted": 0, "won": 0, "lost": 0, "won_value": 0.0}
+
+    branch_agg: dict = {}
+    sales_agg: dict = {}
+    total = _empty_bucket()
+
+    for opp in raw_opps:
+        opp_id = opp.get("customerHash", opp.get("id", ""))
+        prof = profile_map.get(opp_id)
+        if effective_branch and prof is None:
+            continue  # fora do escopo
+
+        branch_key = (prof.get("branch") or "Sem filial") if prof else "Sem filial"
+        sales_key = (prof.get("salesperson") or "Sem vendedor") if prof else "Sem vendedor"
+        status = action_status.get(opp_id, "to_contact")
+        value = action_value.get(opp_id, opp.get("expectedValue", 0.0) or 0.0)
+        won_v = value if status == "won" else 0.0
+
+        for agg, key in ((branch_agg, branch_key), (sales_agg, sales_key)):
+            b = agg.setdefault(key, _empty_bucket())
+            b["total_opportunities"] += 1
+            b["total_value"] += value
+            b[status] = b.get(status, 0) + 1
+            b["won_value"] += won_v
+
+        total["total_opportunities"] += 1
+        total["total_value"] += value
+        total[status] = total.get(status, 0) + 1
+        total["won_value"] += won_v
+
+    def _format(agg: dict, key_name: str):
+        rows = []
+        for k, v in agg.items():
+            actionable = v["contacted"] + v["won"] + v["lost"]
+            rows.append({
+                key_name: k,
+                "totalOpportunities": v["total_opportunities"],
+                "totalValue": round(v["total_value"], 2),
+                "toContact": v["to_contact"],
+                "contacted": v["contacted"],
+                "won": v["won"],
+                "lost": v["lost"],
+                "wonValue": round(v["won_value"], 2),
+                "conversionRate": round(v["won"] / actionable * 100, 1) if actionable else 0.0,
+            })
+        rows.sort(key=lambda x: x["totalValue"], reverse=True)
+        return rows
+
+    return {
+        "success": True,
+        "data": {
+            "by_branch": _format(branch_agg, "branch"),
+            "by_salesperson": _format(sales_agg, "salesperson"),
+            "totals": {
+                "totalOpportunities": total["total_opportunities"],
+                "totalValue": round(total["total_value"], 2),
+                "won": total["won"],
+                "wonValue": round(total["won_value"], 2),
+            },
+        },
+    }

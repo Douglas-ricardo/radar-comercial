@@ -44,7 +44,9 @@ def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
     try:
         # fetch dentro do try: se falhar, o finally ainda libera lock e fecha a sessão
         local_file_path = storage.fetch_to_local(file_ref)
-        result = process_sales_pipeline(local_file_path, company_id)
+        company_obj = db.query(Company).filter(Company.id == company_id).first()
+        cycle_days = company_obj.purchase_cycle_days if company_obj else 90
+        result = process_sales_pipeline(local_file_path, company_id, cycle_days=cycle_days)
 
         # ── ComputedInsights: upsert per (company_id, date_range) ─────────────
         for date_range, insights in result["insights_by_range"].items():

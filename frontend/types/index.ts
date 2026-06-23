@@ -25,6 +25,8 @@ export interface User {
     plan: 'free' | 'pro' | 'enterprise'
     uploadsLimit: number
     uploadsUsed: number
+    /** Ciclo de compra médio em dias (afeta scores de churn). Default: 90. */
+    purchaseCycleDays?: number
     ownerId: string
     createdAt: string
     updatedAt: string
@@ -342,4 +344,61 @@ export interface User {
     customers: ChurnRiskCustomer[]
     counts: { high: number; medium: number; low: number }
     total: number
+  }
+
+  // --------------- Gerencial ---------------
+
+  export interface GerencialRow {
+    totalOpportunities: number
+    totalValue: number
+    toContact: number
+    contacted: number
+    won: number
+    lost: number
+    wonValue: number
+    conversionRate: number
+  }
+
+  export interface GerencialBranchRow extends GerencialRow {
+    branch: string
+  }
+
+  export interface GerencialSalespersonRow extends GerencialRow {
+    salesperson: string
+  }
+
+  export interface GerencialData {
+    by_branch: GerencialBranchRow[]
+    by_salesperson: GerencialSalespersonRow[]
+    totals: {
+      totalOpportunities: number
+      totalValue: number
+      won: number
+      wonValue: number
+    }
+  }
+
+  // --------------- Webhooks ---------------
+
+  export interface WebhookConfig {
+    id: string
+    targetUrl: string
+    events: string[]
+    enabled: boolean
+    createdAt: string
+    lastDelivery?: {
+      status: string
+      responseCode: number | null
+      createdAt: string
+    } | null
+  }
+
+  export interface WebhookDelivery {
+    id: string
+    configId: string
+    event: string
+    status: string
+    responseCode: number | null
+    attempts: number
+    createdAt: string
   }

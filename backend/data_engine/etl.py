@@ -529,7 +529,7 @@ def _build_extra_fields_map(df: pl.DataFrame) -> dict:
     return result
 
 
-def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
+def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict]:
     """
     Computes aggregated per-customer profiles for the entire dataset.
     Uses batch aggregations (O(n)) instead of per-customer DataFrame filters (O(n²)).
@@ -630,7 +630,7 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
 
         span_days = (last_date - first_date).days if (last_date and first_date) else 0
         avg_interval_days = round(span_days / (frequency - 1), 1) if frequency > 1 and span_days > 0 else 0.0
-        churn = assess_churn_risk(recency_days, avg_interval_days, frequency)
+        churn = assess_churn_risk(recency_days, avg_interval_days, frequency, cycle_days=cycle_days)
 
         r_score = 5 if recency_days <= 30 else 4 if recency_days <= 60 else 3 if recency_days <= 90 else 2 if recency_days <= 180 else 1
         f_score = 5 if frequency >= 10 else 4 if frequency >= 5 else 3 if frequency >= 3 else 2 if frequency >= 2 else 1
@@ -714,7 +714,7 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
 
 # ─── Pipeline entry point ─────────────────────────────────────────────────────
 
-def process_sales_pipeline(file_path: str, company_id: str) -> dict:
+def process_sales_pipeline(file_path: str, company_id: str, cycle_days: int = 90) -> dict:
     """
     Loads the raw file, computes all insights and customer profiles entirely in
     memory. Does NOT persist any file or parquet — the caller (tasks.py) deletes
@@ -728,7 +728,7 @@ def process_sales_pipeline(file_path: str, company_id: str) -> dict:
         if result is not None:
             insights_by_range[dr] = result
 
-    customer_profiles = build_customer_profiles(df)
+    customer_profiles = build_customer_profiles(df, cycle_days=cycle_days)
 
     # Summary stats for AnalysisResult (backward-compatible)
     total_revenue = float(df["revenue"].sum() or 0.0)

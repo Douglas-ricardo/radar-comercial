@@ -43,4 +43,4 @@ def test_guardas_preservadas():
     inference._model = None
     # histórico insuficiente e já-churned continuam "none"
     assert inference.assess_churn_risk(40, 20.0, 2)["risk"] == "none"
-    assert inference.assess_churn_risk(90, 20.0, 6)["risk"] == "none"
+    assert inference.assess_churn_risk(90, 20.0, 6, cycle_days=60)["risk"] == "none"

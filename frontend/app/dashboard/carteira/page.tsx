@@ -19,13 +19,13 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X } from 'lucide-react'
+import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X, Download, BarChart3 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { api, opportunitiesApi } from '@/lib/api/client'
+import { api, opportunitiesApi, reportsApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CarteiraOpportunity, OpportunityStatus, RankingEntry } from '@/types'
+import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry } from '@/types'
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   to_contact: 'A contatar',
@@ -148,6 +148,7 @@ export default function CarteiraPage() {
   const [ranking, setRanking] = useState<RankingEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedOpp, setSelectedOpp] = useState<CarteiraOpportunity | null>(null)
+  const [gerencial, setGerencial] = useState<GerencialData | null>(null)
   const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
     open: false, text: '', loading: false,
   })
@@ -174,14 +175,21 @@ export default function CarteiraPage() {
   const load = useCallback(async (branch?: string, salesperson?: string) => {
     if (!company?.id) return
     setIsLoading(true)
-    const [oppsRes, rankRes] = await Promise.all([
+    const requests: Promise<unknown>[] = [
       api.carteira.list(company.id, undefined, branch || undefined, salesperson || undefined),
       api.carteira.getRanking(company.id),
-    ])
+    ]
+    if (isAdmin) requests.push(api.carteira.getGerencial(company.id))
+    const [oppsRes, rankRes, gerencialRes] = await Promise.all(requests) as [
+      Awaited<ReturnType<typeof api.carteira.list>>,
+      Awaited<ReturnType<typeof api.carteira.getRanking>>,
+      Awaited<ReturnType<typeof api.carteira.getGerencial>> | undefined,
+    ]
     if (oppsRes.success && oppsRes.data) setOpportunities(oppsRes.data)
     if (rankRes.success && rankRes.data) setRanking(rankRes.data)
+    if (gerencialRes?.success && gerencialRes?.data) setGerencial(gerencialRes.data)
     setIsLoading(false)
-  }, [company?.id])
+  }, [company?.id, isAdmin])
 
   useEffect(() => { load() }, [load])
 
@@ -260,16 +268,40 @@ export default function CarteiraPage() {
         )}
 
         <Tabs defaultValue="oportunidades">
-          <TabsList>
-            <TabsTrigger value="oportunidades">
-              <Briefcase className="h-4 w-4 mr-2" />
-              Oportunidades
-            </TabsTrigger>
-            <TabsTrigger value="ranking">
-              <Medal className="h-4 w-4 mr-2" />
-              Ranking
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <TabsList>
+              <TabsTrigger value="oportunidades">
+                <Briefcase className="h-4 w-4 mr-2" />
+                Oportunidades
+              </TabsTrigger>
+              <TabsTrigger value="ranking">
+                <Medal className="h-4 w-4 mr-2" />
+                Ranking
+              </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value="gerencial">
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  Gerencial
+                </TabsTrigger>
+              )}
+            </TabsList>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                const url = reportsApi.excelUrl(company?.id ?? '', {
+                  dateRange: '1m',
+                  branch: appliedBranch || undefined,
+                  salesperson: appliedSalesperson || undefined,
+                })
+                window.open(url, '_blank')
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Exportar Excel
+            </Button>
+          </div>
 
           {/* Tab Oportunidades — funil + board por status */}
           <TabsContent value="oportunidades" className="space-y-5 mt-4">
@@ -444,6 +476,121 @@ export default function CarteiraPage() {
               </div>
             )}
           </TabsContent>
+
+          {/* Tab Gerencial — admin only */}
+          {isAdmin && (
+            <TabsContent value="gerencial" className="space-y-5 mt-4">
+              {isLoading ? (
+                <div className="space-y-3">
+                  <div className="h-40 rounded-2xl bg-muted animate-pulse" />
+                  <div className="h-40 rounded-2xl bg-muted animate-pulse" />
+                </div>
+              ) : !gerencial || (gerencial.by_branch.length === 0 && gerencial.by_salesperson.length === 0) ? (
+                <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                  <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                    <BarChart3 className="h-10 w-10 text-muted-foreground mb-3" />
+                    <p className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Sem dados gerenciais</p>
+                    <p className="text-sm text-muted-foreground mt-1">Upload um CSV com colunas de filial e vendedor para ver esta visão.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {/* Totais */}
+                  {gerencial.totals && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: 'Oportunidades', value: gerencial.totals.totalOpportunities, fmt: (v: number) => v.toString() },
+                        { label: 'Valor em risco', value: gerencial.totals.totalValue, fmt: formatCurrency },
+                        { label: 'Ganhos', value: gerencial.totals.won, fmt: (v: number) => v.toString() },
+                        { label: 'Receita recuperada', value: gerencial.totals.wonValue, fmt: formatCurrency },
+                      ].map(({ label, value, fmt }) => (
+                        <Card key={label} className="rounded-2xl border border-border bg-card shadow-sm">
+                          <CardContent className="p-4">
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+                            <p className="font-[family-name:var(--font-display)] text-2xl font-extrabold leading-tight tracking-[-0.02em] text-foreground tabular-nums mt-1">{fmt(value)}</p>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Por Filial */}
+                  {gerencial.by_branch.length > 0 && (
+                    <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Por Filial</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                                <th className="pb-2 pr-4 font-medium">Filial</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Opor.</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Valor em risco</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Contat.</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Ganhos</th>
+                                <th className="pb-2 font-medium text-right">Conversão</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {gerencial.by_branch.map((row) => (
+                                <tr key={row.branch}>
+                                  <td className="py-2 pr-4 font-medium text-foreground">{row.branch}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums">{row.totalOpportunities}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums">{formatCurrency(row.totalValue)}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums text-primary">{row.contacted}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums text-success">{row.won}</td>
+                                  <td className="py-2 text-right tabular-nums">{row.conversionRate}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Por Vendedor */}
+                  {gerencial.by_salesperson.length > 0 && (
+                    <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Por Vendedor</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                                <th className="pb-2 pr-4 font-medium">Vendedor</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Opor.</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Valor em risco</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Contat.</th>
+                                <th className="pb-2 pr-4 font-medium text-right">Ganhos</th>
+                                <th className="pb-2 font-medium text-right">Conversão</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {gerencial.by_salesperson.map((row) => (
+                                <tr key={row.salesperson}>
+                                  <td className="py-2 pr-4 font-medium text-foreground">{row.salesperson}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums">{row.totalOpportunities}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums">{formatCurrency(row.totalValue)}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums text-primary">{row.contacted}</td>
+                                  <td className="py-2 pr-4 text-right tabular-nums text-success">{row.won}</td>
+                                  <td className="py-2 text-right tabular-nums">{row.conversionRate}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              )}
+            </TabsContent>
+          )}
         </Tabs>
       </div>
 

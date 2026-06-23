@@ -49,6 +49,7 @@ export default function SettingsPage() {
   })
   const [companyData, setCompanyData] = useState({
     name: company?.name ?? '',
+    purchaseCycleDays: company?.purchaseCycleDays ?? 90,
   })
   const [passwordData, setPasswordData] = useState({
     current: '',
@@ -138,9 +139,12 @@ export default function SettingsPage() {
     if (!company?.id) return
     setIsSavingCompany(true)
     try {
-      const response = await api.company.update(company.id, { name: companyData.name })
+      const response = await api.company.update(company.id, {
+        name: companyData.name,
+        purchaseCycleDays: companyData.purchaseCycleDays,
+      })
       if (response.success && response.data) {
-        updateCompany({ name: response.data.name })
+        updateCompany({ name: response.data.name, purchaseCycleDays: response.data.purchaseCycleDays })
         toast.success('Dados da empresa atualizados.')
       } else {
         toast.error(response.error ?? 'Não foi possível salvar os dados da empresa.')
@@ -334,6 +338,24 @@ export default function SettingsPage() {
                       }
                       disabled={isSavingCompany}
                     />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="purchase-cycle">Ciclo de compra médio (dias)</FieldLabel>
+                    <Input
+                      id="purchase-cycle"
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={companyData.purchaseCycleDays}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10)
+                        if (!isNaN(v)) setCompanyData((prev) => ({ ...prev, purchaseCycleDays: v }))
+                      }}
+                      disabled={isSavingCompany}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Intervalo típico entre compras no seu ramo. Afeta os scores de risco de churn.
+                    </p>
                   </Field>
                   <Field>
                     <FieldLabel>Plano atual</FieldLabel>

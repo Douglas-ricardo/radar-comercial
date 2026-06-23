@@ -11,8 +11,6 @@ aqui detectamos quem está prestes a sumir — janela de ação proativa.
 """
 from __future__ import annotations
 
-# Acima deste nº de dias o cliente já é tratado como churned (reativo).
-_CHURNED_THRESHOLD = 60
 # Mínimo de compras para o intervalo médio ser confiável.
 _MIN_PURCHASES = 3
 
@@ -21,13 +19,17 @@ def assess_churn_risk(
     recency_days: int,
     avg_interval_days: float,
     frequency: int,
-    churned_threshold: int = _CHURNED_THRESHOLD,
+    cycle_days: int = 90,
 ) -> dict:
     """
     Retorna {risk, score, days_overdue}:
       - risk: "none" | "low" | "medium" | "high"
       - score: 0–100 (proporcional a quão atrasado está)
       - days_overdue: dias além do intervalo médio esperado
+
+    cycle_days: ciclo de compra configurado pela empresa (default 90).
+    Clientes com recency > cycle_days já são tratados como churned reativos
+    pelo ETL — aqui detectamos quem está prestes a sumir (janela proativa).
     """
     none = {"risk": "none", "score": 0, "days_overdue": 0}
 
@@ -35,7 +37,7 @@ def assess_churn_risk(
     if frequency < _MIN_PURCHASES or avg_interval_days <= 0:
         return none
     # já passou do limiar de churn → é reativo, não preditivo
-    if recency_days > churned_threshold:
+    if recency_days > cycle_days:
         return none
 
     ratio = recency_days / avg_interval_days

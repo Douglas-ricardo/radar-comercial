@@ -22,6 +22,10 @@ class Company(Base):
     plan_updated_at = Column(DateTime, nullable=True)
     # ID do usuário fundador (primeiro admin). Honra o contrato do frontend (types/index.ts).
     owner_id = Column(String, nullable=True)
+    # Ciclo de compra médio configurado pela empresa (dias). Afeta heurística de churn:
+    # ramos com ciclos longos (construção, agro) não devem ter clientes marcados como
+    # at_risk com 60 dias de recência — o padrão 90 cobre a maioria das PMEs.
+    purchase_cycle_days = Column(Integer, default=90, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -349,3 +353,32 @@ class OutreachAttribution(Base):
     __table_args__ = (
         Index("ix_outreach_attr_company_status", "company_id", "status"),
     )
+
+
+class WebhookConfig(Base):
+    """Webhook de saída por empresa: push de eventos de oportunidade para CRMs externos."""
+    __tablename__ = "webhook_configs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    target_url = Column(String, nullable=False)
+    secret = Column(String, nullable=False)   # chave HMAC-SHA256 gerada automaticamente
+    events = Column(JSON, default=list)        # ["opportunity.updated", "opportunity.won"]
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class WebhookDelivery(Base):
+    """Log de cada tentativa de entrega de webhook (debug + auditoria)."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    config_id = Column(String, ForeignKey("webhook_configs.id"), nullable=False, index=True)
+    company_id = Column(String, nullable=False, index=True)
+    event = Column(String, nullable=False)
+    payload = Column(JSON)
+    status = Column(String, default="pending")   # pending | delivered | failed
+    response_code = Column(Integer, nullable=True)
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)

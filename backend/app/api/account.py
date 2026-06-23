@@ -22,6 +22,7 @@ class UpdateUserRequest(BaseModel):
 class UpdateCompanyRequest(BaseModel):
     name: str | None = None
     cnpj: str | None = None
+    purchase_cycle_days: int | None = None
 
 
 @users_router.patch("/{user_id}")
@@ -89,6 +90,11 @@ def update_company(
     if data.cnpj is not None:
         company.cnpj = data.cnpj.strip() or None
 
+    if data.purchase_cycle_days is not None:
+        if not (1 <= data.purchase_cycle_days <= 365):
+            raise HTTPException(status_code=400, detail="Ciclo de compra deve ser entre 1 e 365 dias.")
+        company.purchase_cycle_days = data.purchase_cycle_days
+
     db.commit()
     db.refresh(company)
 
@@ -103,6 +109,7 @@ def update_company(
             "plan": company.plan,
             "uploadsLimit": company.uploads_limit,
             "uploadsUsed": company.uploads_used,
+            "purchaseCycleDays": company.purchase_cycle_days,
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,

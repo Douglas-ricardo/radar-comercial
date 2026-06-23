@@ -31,8 +31,8 @@ def test_historico_insuficiente_nao_preve():
 
 
 def test_ja_churned_nao_e_preditivo():
-    # recência > 60 (já sumiu) → tratado pelo churn reativo, não preditivo
-    assert assess_churn_risk(90, 20.0, 6)["risk"] == "none"
+    # recência > cycle_days (já sumiu) → tratado pelo churn reativo, não preditivo
+    assert assess_churn_risk(90, 20.0, 6, cycle_days=60)["risk"] == "none"
 
 
 # ── ETL produz churn_risk ─────────────────────────────────────────────────────

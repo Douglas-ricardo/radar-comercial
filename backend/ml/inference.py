@@ -18,7 +18,7 @@ _MODEL_PATH = os.getenv(
     "CHURN_MODEL_PATH", os.path.join(os.path.dirname(__file__), "model.joblib")
 )
 _MIN_PURCHASES = 3
-_CHURNED_THRESHOLD = 60
+_DEFAULT_CYCLE_DAYS = 90
 
 _model = None
 _loaded = False
@@ -50,7 +50,7 @@ def assess_churn_risk(
     recency_days: int,
     avg_interval_days: float,
     frequency: int,
-    churned_threshold: int = _CHURNED_THRESHOLD,
+    cycle_days: int = _DEFAULT_CYCLE_DAYS,
 ) -> dict:
     """Igual ao heurístico: {risk, score, days_overdue}. Usa modelo se disponível."""
     none = {"risk": "none", "score": 0, "days_overdue": 0}
@@ -58,18 +58,18 @@ def assess_churn_risk(
     # Guardas idênticas ao heurístico (coerência com o churn reativo do ETL)
     if frequency < _MIN_PURCHASES or avg_interval_days <= 0:
         return none
-    if recency_days > churned_threshold:
+    if recency_days > cycle_days:
         return none
 
     model = _load_model()
     if model is None:
-        return _heuristic(recency_days, avg_interval_days, frequency, churned_threshold)
+        return _heuristic(recency_days, avg_interval_days, frequency, cycle_days)
 
     try:
         prob = float(model.predict_proba([extract_features(recency_days, avg_interval_days, frequency)])[0][1])
     except Exception as e:
         logger.warning("ml.churn.predict_falhou", extra={"erro": str(e)})
-        return _heuristic(recency_days, avg_interval_days, frequency, churned_threshold)
+        return _heuristic(recency_days, avg_interval_days, frequency, cycle_days)
 
     days_overdue = max(0, int(round(recency_days - avg_interval_days)))
     score = max(0, min(100, int(round(prob * 100))))

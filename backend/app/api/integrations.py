@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_and_company, require_admin, validate_api_key
 from app.core.rate_limit import limiter
-from app.domain.models import ApiKey, Company, IntegrationConfig, UploadedFile
+from app.domain.models import ApiKey, Company, IntegrationConfig, UploadedFile, WebhookConfig, WebhookDelivery
 from app.infrastructure.database import get_db_session
 from app.infrastructure import storage
 from app.services.plan_service import PlanService
@@ -301,4 +301,162 @@ def ingest_data(
         "success": True,
         "data": {"file_id": file_record.id, "records_queued": len(body.records)},
         "message": "Dados recebidos e em processamento.",
+    }
+
+
+# ─── Webhooks de saída ────────────────────────────────────────────────────────
+
+_VALID_EVENTS = {"opportunity.updated", "opportunity.won", "*"}
+
+
+class CreateWebhookRequest(BaseModel):
+    target_url: str
+    events: List[str] = ["opportunity.updated"]
+
+
+@router.get("/webhooks")
+def list_webhooks(
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem gerenciar webhooks.")
+
+    configs = db.query(WebhookConfig).filter_by(company_id=token_data.company_id).all()
+    result = []
+    for cfg in configs:
+        last = (
+            db.query(WebhookDelivery)
+            .filter_by(config_id=cfg.id)
+            .order_by(WebhookDelivery.created_at.desc())
+            .first()
+        )
+        result.append({
+            "id": cfg.id,
+            "targetUrl": cfg.target_url,
+            "events": cfg.events,
+            "enabled": cfg.enabled,
+            "createdAt": cfg.created_at.isoformat() if cfg.created_at else None,
+            "lastDelivery": {
+                "status": last.status,
+                "responseCode": last.response_code,
+                "createdAt": last.created_at.isoformat() if last.created_at else None,
+            } if last else None,
+        })
+    return {"success": True, "data": result}
+
+
+@router.post("/webhooks")
+def create_webhook(
+    data: CreateWebhookRequest,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem criar webhooks.")
+
+    invalid = [e for e in data.events if e not in _VALID_EVENTS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Eventos inválidos: {invalid}. Válidos: {sorted(_VALID_EVENTS)}")
+
+    cfg = WebhookConfig(
+        company_id=token_data.company_id,
+        target_url=data.target_url.strip(),
+        secret=secrets.token_hex(32),
+        events=data.events,
+    )
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+
+    logger.info("integrations.webhook.created", extra={"company_id": token_data.company_id, "id": cfg.id})
+    return {
+        "success": True,
+        "data": {
+            "id": cfg.id,
+            "targetUrl": cfg.target_url,
+            "events": cfg.events,
+            "secret": cfg.secret,
+            "enabled": cfg.enabled,
+        },
+        "message": "Webhook criado. Guarde o campo 'secret' — ele não será exibido novamente.",
+    }
+
+
+@router.delete("/webhooks/{webhook_id}")
+def delete_webhook(
+    webhook_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem remover webhooks.")
+
+    cfg = db.query(WebhookConfig).filter_by(id=webhook_id, company_id=token_data.company_id).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Webhook não encontrado.")
+
+    db.delete(cfg)
+    db.commit()
+    logger.info("integrations.webhook.deleted", extra={"company_id": token_data.company_id, "id": webhook_id})
+    return {"success": True, "message": "Webhook removido."}
+
+
+@router.post("/webhooks/{webhook_id}/test")
+def test_webhook(
+    webhook_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem testar webhooks.")
+
+    cfg = db.query(WebhookConfig).filter_by(id=webhook_id, company_id=token_data.company_id).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Webhook não encontrado.")
+
+    from app.workers.webhook_tasks import deliver_webhook_task
+    deliver_webhook_task.delay(cfg.id, token_data.company_id, "test", {
+        "message": "Payload de teste enviado pelo Radar Comercial.",
+    })
+    return {"success": True, "message": "Disparo de teste enfileirado."}
+
+
+@router.get("/webhooks/deliveries")
+def list_deliveries(
+    limit: int = 50,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem ver entregas.")
+
+    config_ids = [
+        r[0] for r in
+        db.query(WebhookConfig.id).filter_by(company_id=token_data.company_id).all()
+    ]
+    if not config_ids:
+        return {"success": True, "data": []}
+
+    deliveries = (
+        db.query(WebhookDelivery)
+        .filter(WebhookDelivery.config_id.in_(config_ids))
+        .order_by(WebhookDelivery.created_at.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": d.id,
+                "configId": d.config_id,
+                "event": d.event,
+                "status": d.status,
+                "responseCode": d.response_code,
+                "attempts": d.attempts,
+                "createdAt": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in deliveries
+        ],
     }

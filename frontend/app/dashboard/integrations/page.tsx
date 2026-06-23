@@ -20,10 +20,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Plug2, Plus, Copy, Trash2, Key, Clock, CheckCircle2, RefreshCw } from 'lucide-react'
-import { api } from '@/lib/api/client'
+import { Plug2, Plus, Copy, Trash2, Key, Clock, CheckCircle2, RefreshCw, Webhook, Send } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { api, webhooksApi } from '@/lib/api/client'
 import { toast } from 'sonner'
-import type { ApiKey, NewApiKey, SyncConfig } from '@/types'
+import type { ApiKey, NewApiKey, SyncConfig, WebhookConfig, WebhookDelivery } from '@/types'
 
 function formatDate(iso: string | null) {
   if (!iso) return '—'
@@ -39,6 +40,15 @@ function IntegrationsPageContent() {
   const [createdKey, setCreatedKey] = useState<NewApiKey | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // Webhooks state
+  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([])
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([])
+  const [showWebhookDialog, setShowWebhookDialog] = useState(false)
+  const [showDeliveriesDialog, setShowDeliveriesDialog] = useState(false)
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(['opportunity.updated'])
+  const [isCreatingWebhook, setIsCreatingWebhook] = useState(false)
 
   // Google Sheets sync state
   const [syncConfig, setSyncConfig] = useState<SyncConfig | null>(null)
@@ -78,10 +88,51 @@ function IntegrationsPageContent() {
     }
   }, [])
 
+  const loadWebhooks = useCallback(async () => {
+    const res = await webhooksApi.list()
+    if (res.success && res.data) setWebhooks(res.data)
+  }, [])
+
   useEffect(() => {
     loadKeys()
     loadSyncConfig()
-  }, [loadKeys, loadSyncConfig])
+    loadWebhooks()
+  }, [loadKeys, loadSyncConfig, loadWebhooks])
+
+  const handleCreateWebhook = async () => {
+    if (!webhookUrl.trim()) { toast.error('Informe a URL do webhook.'); return }
+    setIsCreatingWebhook(true)
+    try {
+      const res = await webhooksApi.create({ targetUrl: webhookUrl.trim(), events: webhookEvents })
+      if (res.success && res.data) {
+        toast.success(`Webhook criado. Secret: ${res.data.secret}`)
+        setShowWebhookDialog(false)
+        setWebhookUrl('')
+        loadWebhooks()
+      } else {
+        toast.error(res.error ?? 'Erro ao criar webhook.')
+      }
+    } catch { toast.error('Erro de conexão.') }
+    finally { setIsCreatingWebhook(false) }
+  }
+
+  const handleDeleteWebhook = async (id: string) => {
+    const res = await webhooksApi.remove(id)
+    if (res.success) { toast.success('Webhook removido.'); loadWebhooks() }
+    else toast.error(res.error ?? 'Erro ao remover.')
+  }
+
+  const handleTestWebhook = async (id: string) => {
+    const res = await webhooksApi.test(id)
+    if (res.success) toast.success('Payload de teste enviado.')
+    else toast.error(res.error ?? 'Erro ao testar.')
+  }
+
+  const handleShowDeliveries = async () => {
+    const res = await webhooksApi.listDeliveries()
+    if (res.success && res.data) setDeliveries(res.data)
+    setShowDeliveriesDialog(true)
+  }
 
   const handleSaveSync = async () => {
     if (!sheetUrl.trim()) {
@@ -444,6 +495,155 @@ Content-Type: application/json
           </Button>
           <DialogFooter>
             <Button onClick={() => setCreatedKey(null)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Card: Webhooks de Saída */}
+      <Card className="rounded-2xl border border-border bg-card shadow-sm">
+        <CardHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                <Webhook className="h-5 w-5 text-primary" />
+                Webhooks de Saída
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Notifique seu CRM (HubSpot, Pipedrive, Salesforce) quando oportunidades forem atualizadas.
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleShowDeliveries}>
+                Ver entregas
+              </Button>
+              <Button size="sm" onClick={() => setShowWebhookDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Adicionar
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {webhooks.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              Nenhum webhook configurado. Clique em "Adicionar" para criar um.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {webhooks.map((wh) => (
+                <div key={wh.id} className="flex items-start justify-between gap-4 rounded-xl border border-border p-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{wh.targetUrl}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{wh.events.join(', ')}</p>
+                    {wh.lastDelivery && (
+                      <p className="text-xs mt-1">
+                        <span className={wh.lastDelivery.status === 'delivered' ? 'text-success' : 'text-destructive'}>
+                          {wh.lastDelivery.status}
+                        </span>
+                        {wh.lastDelivery.responseCode && (
+                          <span className="text-muted-foreground"> · {wh.lastDelivery.responseCode}</span>
+                        )}
+                        <span className="text-muted-foreground"> · {formatDate(wh.lastDelivery.createdAt)}</span>
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button variant="ghost" size="sm" onClick={() => handleTestWebhook(wh.id)}>
+                      <Send className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDeleteWebhook(wh.id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Dialog: criar webhook */}
+      <Dialog open={showWebhookDialog} onOpenChange={setShowWebhookDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Adicionar webhook</DialogTitle>
+            <DialogDescription>
+              O Radar enviará um POST com assinatura HMAC-SHA256 no header X-Radar-Signature.
+            </DialogDescription>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor="webhook-url">URL de destino</FieldLabel>
+            <Input
+              id="webhook-url"
+              placeholder="https://hooks.example.com/radar"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+            />
+          </Field>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Eventos</p>
+            {[
+              { value: 'opportunity.updated', label: 'Oportunidade atualizada (qualquer status)' },
+              { value: 'opportunity.won', label: 'Apenas quando marcada como Ganho' },
+            ].map(({ value, label }) => (
+              <div key={value} className="flex items-center gap-2">
+                <Checkbox
+                  id={value}
+                  checked={webhookEvents.includes(value)}
+                  onCheckedChange={(checked) => {
+                    setWebhookEvents((prev) =>
+                      checked ? [...prev, value] : prev.filter((e) => e !== value)
+                    )
+                  }}
+                />
+                <label htmlFor={value} className="text-sm text-foreground cursor-pointer">{label}</label>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowWebhookDialog(false)}>Cancelar</Button>
+            <Button onClick={handleCreateWebhook} disabled={isCreatingWebhook || !webhookUrl.trim()}>
+              {isCreatingWebhook && <Spinner className="mr-2 h-4 w-4" />}
+              Criar webhook
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: entregas recentes */}
+      <Dialog open={showDeliveriesDialog} onOpenChange={setShowDeliveriesDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Últimas entregas</DialogTitle>
+          </DialogHeader>
+          {deliveries.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">Nenhuma entrega ainda.</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="pb-2 pr-3 font-medium">Evento</th>
+                    <th className="pb-2 pr-3 font-medium">Status</th>
+                    <th className="pb-2 pr-3 font-medium">Código</th>
+                    <th className="pb-2 font-medium">Data</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {deliveries.map((d) => (
+                    <tr key={d.id}>
+                      <td className="py-1.5 pr-3 font-mono">{d.event}</td>
+                      <td className={`py-1.5 pr-3 ${d.status === 'delivered' ? 'text-success' : 'text-destructive'}`}>{d.status}</td>
+                      <td className="py-1.5 pr-3">{d.responseCode ?? '—'}</td>
+                      <td className="py-1.5">{formatDate(d.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeliveriesDialog(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
