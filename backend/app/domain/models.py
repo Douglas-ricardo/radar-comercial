@@ -53,6 +53,10 @@ class User(Base):
     mfa_enabled = Column(Boolean, default=False, nullable=False)
     mfa_secret = Column(String, nullable=True)
     mfa_backup_codes = Column(JSON, default=list)  # lista de SHA-256 de códigos de backup
+    # RBAC granular (opcional): papel customizado e unidade organizacional.
+    # Ausentes → cai no preset do papel legado (role) e sem restrição de unidade.
+    role_id = Column(String, ForeignKey("roles.id"), nullable=True)
+    org_unit_id = Column(String, ForeignKey("org_units.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -477,6 +481,35 @@ class WebhookDelivery(Base):
     response_code = Column(Integer, nullable=True)
     attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+
+class Role(Base):
+    """Papel customizado com matriz de permissões. base_role mantém compat com os
+    checks legados (require_admin/analyst). permissions = lista de chaves do catálogo."""
+    __tablename__ = "roles"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    base_role = Column(String, default="viewer")   # admin|analyst|viewer (tier legado)
+    permissions = Column(JSON, default=list)        # ["carteira.write", ...]
+    is_system = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class OrgUnit(Base):
+    """Unidade organizacional (região → filial → equipe). Árvore via parent_id.
+    Unidades do tipo 'branch' têm name = CustomerProfile.branch (territorialização)."""
+    __tablename__ = "org_units"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    parent_id = Column(String, ForeignKey("org_units.id"), nullable=True, index=True)
+    type = Column(String, default="branch")   # "region" | "branch" | "team"
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class SSOConnection(Base):

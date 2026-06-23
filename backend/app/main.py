@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi import _rate_limit_exceeded_handler
 
-from app.api import files, insights, auth, team, customers, billing, account, integrations, notifications, carteira, opportunities, outreach, reports, campaigns, audit, mfa, sso, scim
+from app.api import files, insights, auth, team, customers, billing, account, integrations, notifications, carteira, opportunities, outreach, reports, campaigns, audit, mfa, sso, scim, roles, org_units
 from app.core.rate_limit import limiter
 from app.core.observability import configure_logging, init_sentry
 
@@ -76,6 +76,8 @@ app.include_router(audit.router)
 app.include_router(mfa.router)
 app.include_router(sso.router)
 app.include_router(scim.router)
+app.include_router(roles.router)
+app.include_router(org_units.router)
 
 @app.get("/health")
 async def health_check():

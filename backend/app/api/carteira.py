@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_and_company
+from app.core.permissions import visible_branches
 from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, SalesTarget, User
 from app.infrastructure.database import get_db_session
 
@@ -15,6 +16,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/carteira", tags=["Carteira"])
 
 OpportunityStatus = Literal["to_contact", "contacted", "won", "lost"]
+
+
+def _allowed_branches(db: Session, token_data, branch_param: str | None) -> set[str] | None:
+    """Conjunto de filiais visíveis ao usuário (territorialização). None = sem restrição.
+    Prioridade: unidade organizacional (subárvore) > scope legado 'branch:X'.
+    O parâmetro branch= estreita dentro do permitido (e é livre para admin)."""
+    allowed: set[str] | None = None
+    if token_data.role != "admin":
+        vb = visible_branches(db, token_data.company_id, token_data.org_unit_id)
+        if vb is not None:
+            allowed = vb
+        elif token_data.scope:
+            parts = token_data.scope.split(":", 1)
+            if parts[0] == "branch" and len(parts) == 2:
+                allowed = {parts[1]}
+    if branch_param:
+        allowed = {branch_param} if allowed is None else (allowed & {branch_param})
+    return allowed
 
 
 class UpsertActionRequest(BaseModel):
@@ -53,23 +72,19 @@ def list_carteira(
     if token_data.company_id != company_id:
         raise HTTPException(status_code=403, detail="Acesso negado.")
 
-    # Escopo automático: se o usuário tem scope "branch:X" e não é admin,
-    # filtra só a filial dele (pode ser sobrescrito por branch= param apenas por admins).
-    effective_branch = branch
-    if token_data.scope and token_data.role != "admin":
-        scope_parts = token_data.scope.split(":", 1)
-        if scope_parts[0] == "branch" and len(scope_parts) == 2:
-            effective_branch = scope_parts[1]
+    # Restrição territorial: unidade organizacional (subárvore) tem prioridade;
+    # senão cai no scope legado "branch:X". Admin não é restrito (a menos que filtre).
+    allowed_branches = _allowed_branches(db, token_data, branch)
 
     # Mapa customerHash → (branch, salesperson) para filtro por esses campos.
     # Consultado só se filtro está ativo (evita query desnecessária).
     scope_hashes: set | None = None
-    if effective_branch or salesperson:
+    if allowed_branches is not None or salesperson:
         q = db.query(CustomerProfile.customer_hash).filter(
             CustomerProfile.company_id == company_id
         )
-        if effective_branch:
-            q = q.filter(CustomerProfile.branch == effective_branch)
+        if allowed_branches is not None:
+            q = q.filter(CustomerProfile.branch.in_(allowed_branches))
         if salesperson:
             q = q.filter(CustomerProfile.salesperson == salesperson)
         scope_hashes = {row[0] for row in q.all()}
@@ -257,12 +272,8 @@ def get_gerencial(
     if token_data.company_id != company_id:
         raise HTTPException(status_code=403, detail="Acesso negado.")
 
-    # Determinar filtro de filial pelo scope do token (mesmo mecanismo do /carteira)
-    effective_branch: str | None = None
-    if token_data.scope and token_data.role != "admin":
-        parts = token_data.scope.split(":", 1)
-        if parts[0] == "branch" and len(parts) == 2:
-            effective_branch = parts[1]
+    # Restrição territorial (unidade organizacional > scope legado), mesmo helper do /carteira
+    allowed_branches = _allowed_branches(db, token_data, None)
 
     # Carregar oportunidades do ComputedInsights
     insights = None
@@ -287,8 +298,8 @@ def get_gerencial(
         CustomerProfile.company_id == company_id,
         CustomerProfile.customer_hash.in_(hashes),
     )
-    if effective_branch:
-        q = q.filter(CustomerProfile.branch == effective_branch)
+    if allowed_branches is not None:
+        q = q.filter(CustomerProfile.branch.in_(allowed_branches))
     profile_map = {row[0]: {"branch": row[1], "salesperson": row[2]} for row in q.all()}
 
     # Carregar todas as ações da empresa para mapear status por opp_id

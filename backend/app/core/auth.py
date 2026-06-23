@@ -33,6 +33,8 @@ class TokenData(BaseModel):
     role: str
     scope: str | None = None  # "branch:SP-001" → filtra carteira/clientes; None = sem restrição
     sid: str | None = None    # session id (sessão durável revogável); None = token legado
+    permissions: list[str] = []   # permissões efetivas resolvidas (RBAC granular)
+    org_unit_id: str | None = None  # unidade organizacional (territorialização hierárquica)
 
 async def get_current_user_and_company(
     request: Request,
@@ -80,7 +82,14 @@ async def get_current_user_and_company(
                 logger.info("auth.session.revoked", extra={"user_id": user_id, "sid": sid})
                 raise credentials_exception
 
-        return TokenData(user_id=user_id, company_id=company_id, role=role, scope=scope, sid=sid)
+        # Resolve permissões efetivas (papel customizado ou preset legado) e a unidade.
+        from app.core.permissions import resolve_permissions
+        permissions = sorted(resolve_permissions(db, user))
+
+        return TokenData(
+            user_id=user_id, company_id=company_id, role=role, scope=scope, sid=sid,
+            permissions=permissions, org_unit_id=getattr(user, "org_unit_id", None),
+        )
 
     except jwt.ExpiredSignatureError:
         logger.info("auth.token.expired")

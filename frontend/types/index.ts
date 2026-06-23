@@ -205,8 +205,43 @@ export interface User {
     name: string
     role: 'admin' | 'analyst' | 'viewer'
     scope?: string | null
+    roleId?: string | null
+    orgUnitId?: string | null
     status: 'pending' | 'active'
     createdAt?: string | null
+  }
+
+  // --------------- RBAC: Papéis & Permissões ---------------
+
+  export interface PermissionCatalogEntry {
+    key: string
+    group: string
+    label: string
+  }
+
+  export interface CustomRole {
+    id: string
+    name: string
+    baseRole: 'admin' | 'analyst' | 'viewer'
+    permissions: string[]
+    isSystem: boolean
+    createdAt: string | null
+  }
+
+  export interface RolesData {
+    catalog: PermissionCatalogEntry[]
+    presets: Record<string, string[]>
+    roles: CustomRole[]
+  }
+
+  // --------------- Estrutura organizacional ---------------
+
+  export interface OrgUnit {
+    id: string
+    name: string
+    type: 'region' | 'branch' | 'team'
+    parentId: string | null
+    createdAt: string | null
   }
   
   // --------------- API ---------------

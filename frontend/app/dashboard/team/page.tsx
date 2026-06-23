@@ -101,6 +101,10 @@ function TeamPageContent() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<MemberRole>('analyst')
   const [inviteScope, setInviteScope] = useState('')
+  const [inviteRoleId, setInviteRoleId] = useState('')
+  const [inviteOrgUnitId, setInviteOrgUnitId] = useState('')
+  const [customRoles, setCustomRoles] = useState<{ id: string; name: string }[]>([])
+  const [orgUnits, setOrgUnits] = useState<{ id: string; name: string; type: string }[]>([])
   const [isInviting, setIsInviting] = useState(false)
 
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false)
@@ -113,6 +117,12 @@ function TeamPageContent() {
   const [isUpdatingRole, setIsUpdatingRole] = useState(false)
 
   const isValidInviteEmail = EMAIL_REGEX.test(inviteEmail.trim())
+
+  // Carrega papéis customizados e unidades organizacionais (para o convite)
+  useEffect(() => {
+    api.roles.list().then(r => { if (r.success && r.data) setCustomRoles(r.data.roles.map(x => ({ id: x.id, name: x.name }))) })
+    api.orgUnits.list().then(r => { if (r.success && r.data) setOrgUnits(r.data.map(x => ({ id: x.id, name: x.name, type: x.type }))) })
+  }, [])
 
   // Carrega os membros reais da API
   const loadMembers = useCallback(async () => {
@@ -184,13 +194,18 @@ function TeamPageContent() {
     setIsInviting(true)
     try {
       const scope = inviteScope.trim() || null
-      const response = await api.team.invite(company.id, inviteEmail.trim(), inviteRole, scope)
+      const response = await api.team.invite(company.id, inviteEmail.trim(), inviteRole, scope, {
+        roleId: inviteRoleId || null,
+        orgUnitId: inviteOrgUnitId || null,
+      })
       if (response.success) {
         toast.success('Convite enviado com sucesso!')
         setInviteDialogOpen(false)
         setInviteEmail('')
         setInviteRole('analyst')
         setInviteScope('')
+        setInviteRoleId('')
+        setInviteOrgUnitId('')
         loadMembers()
       } else {
         toast.error(response.error ?? 'Não foi possível enviar o convite.')
@@ -414,8 +429,32 @@ function TeamPageContent() {
                           </SelectContent>
                         </Select>
                       </Field>
+                      {customRoles.length > 0 && (
+                        <Field>
+                          <FieldLabel htmlFor="custom-role">Papel customizado <span className="text-muted-foreground font-normal">(opcional)</span></FieldLabel>
+                          <Select value={inviteRoleId || 'none'} onValueChange={(v) => setInviteRoleId(v === 'none' ? '' : v)}>
+                            <SelectTrigger id="custom-role"><SelectValue placeholder="Usar papel padrão" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Usar papel padrão</SelectItem>
+                              {customRoles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      )}
+                      {orgUnits.length > 0 && (
+                        <Field>
+                          <FieldLabel htmlFor="org-unit">Unidade organizacional <span className="text-muted-foreground font-normal">(opcional)</span></FieldLabel>
+                          <Select value={inviteOrgUnitId || 'none'} onValueChange={(v) => setInviteOrgUnitId(v === 'none' ? '' : v)}>
+                            <SelectTrigger id="org-unit"><SelectValue placeholder="Sem restrição" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Sem restrição</SelectItem>
+                              {orgUnits.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      )}
                       <Field>
-                        <FieldLabel htmlFor="scope">Escopo territorial <span className="text-muted-foreground font-normal">(opcional)</span></FieldLabel>
+                        <FieldLabel htmlFor="scope">Escopo territorial (legado) <span className="text-muted-foreground font-normal">(opcional)</span></FieldLabel>
                         <Input
                           id="scope"
                           type="text"

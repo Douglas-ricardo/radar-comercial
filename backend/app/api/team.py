@@ -32,6 +32,8 @@ class InviteRequest(BaseModel):
     email: str
     role: TeamRole
     scope: str | None = None  # ex: "branch:SP-001"; None = sem restrição territorial
+    role_id: str | None = None       # papel customizado (RBAC granular)
+    org_unit_id: str | None = None   # unidade organizacional (territorialização hierárquica)
 
     @field_validator("email")
     @classmethod
@@ -45,6 +47,28 @@ class InviteRequest(BaseModel):
 class UpdateRoleRequest(BaseModel):
     role: TeamRole
     scope: str | None = None  # opcional — atualiza scope junto com role
+    role_id: str | None = None
+    org_unit_id: str | None = None
+
+
+def _apply_custom_role(db: Session, company_id: str, user: User, role_id: str | None) -> None:
+    """Atribui papel customizado: valida posse e fixa o tier legado (base_role)."""
+    from app.domain.models import Role
+    if role_id:
+        role = db.query(Role).filter_by(id=role_id, company_id=company_id).first()
+        if not role:
+            raise HTTPException(status_code=400, detail="Papel customizado não encontrado.")
+        user.role_id = role.id
+        user.role = role.base_role  # mantém os checks legados (require_admin/analyst) coerentes
+    else:
+        user.role_id = None
+
+
+def _validate_org_unit(db: Session, company_id: str, org_unit_id: str | None) -> None:
+    if org_unit_id:
+        from app.domain.models import OrgUnit
+        if not db.query(OrgUnit).filter_by(id=org_unit_id, company_id=company_id).first():
+            raise HTTPException(status_code=400, detail="Unidade organizacional não encontrada.")
 
 
 @router.get("/{company_id}")
@@ -71,6 +95,8 @@ def list_team_members(
                 "name": u.name,
                 "role": u.role,
                 "scope": u.scope,
+                "roleId": u.role_id,
+                "orgUnitId": u.org_unit_id,
                 "status": u.status,
                 "createdAt": u.created_at.isoformat() if u.created_at else None,
             }
@@ -105,15 +131,18 @@ def invite_member(
         temp_password.encode("utf-8"), bcrypt.gensalt()
     ).decode("utf-8")
 
+    _validate_org_unit(db, company_id, data.org_unit_id)
     new_user = User(
         email=data.email,
         name="Utilizador Convidado",
         hashed_password=hashed_password,
         role=data.role,
         scope=data.scope,
+        org_unit_id=data.org_unit_id,
         status="pending",
         company_id=company_id,
     )
+    _apply_custom_role(db, company_id, new_user, data.role_id)
     db.add(new_user)
     db.commit()
 
@@ -190,6 +219,11 @@ def update_member_role(
     user_to_update.role = data.role
     if "scope" in data.model_fields_set:
         user_to_update.scope = data.scope
+    if "org_unit_id" in data.model_fields_set:
+        _validate_org_unit(db, token_data.company_id, data.org_unit_id)
+        user_to_update.org_unit_id = data.org_unit_id
+    if "role_id" in data.model_fields_set:
+        _apply_custom_role(db, token_data.company_id, user_to_update, data.role_id)
     db.commit()
 
     logger.info("team.member.role_updated", extra={"user_id": user_id, "role": data.role})
@@ -202,6 +236,8 @@ def update_member_role(
             "name": user_to_update.name,
             "role": user_to_update.role,
             "scope": user_to_update.scope,
+            "roleId": user_to_update.role_id,
+            "orgUnitId": user_to_update.org_unit_id,
             "status": user_to_update.status,
         },
     }

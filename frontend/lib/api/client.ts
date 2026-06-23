@@ -46,6 +46,9 @@ import type {
   SSOConnectionsResult,
   SSODiscovery,
   ScimTokenResult,
+  RolesData,
+  CustomRole,
+  OrgUnit,
 } from '@/types'
 
 /** Resposta de login: ou autentica direto, ou exige 2º fator (MFA). */
@@ -341,22 +344,33 @@ export const teamApi = {
     companyId: string,
     email: string,
     role: TeamMember['role'],
-    scope?: string | null
+    scope?: string | null,
+    extra?: { roleId?: string | null; orgUnitId?: string | null }
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/${companyId}/invite`, {
       method: 'POST',
-      body: JSON.stringify({ email, role, scope: scope ?? null }),
+      body: JSON.stringify({
+        email, role, scope: scope ?? null,
+        role_id: extra?.roleId ?? null,
+        org_unit_id: extra?.orgUnitId ?? null,
+      }),
     })
   },
 
   async updateRole(
     memberId: string,
     role: TeamMember['role'],
-    scope?: string | null
+    scope?: string | null,
+    extra?: { roleId?: string | null; orgUnitId?: string | null }
   ): Promise<ApiResponse<TeamMember>> {
     return fetchWithAuth(`/team/members/${memberId}/role`, {
       method: 'PATCH',
-      body: JSON.stringify({ role, ...(scope !== undefined ? { scope } : {}) }),
+      body: JSON.stringify({
+        role,
+        ...(scope !== undefined ? { scope } : {}),
+        ...(extra?.roleId !== undefined ? { role_id: extra.roleId } : {}),
+        ...(extra?.orgUnitId !== undefined ? { org_unit_id: extra.orgUnitId } : {}),
+      }),
     })
   },
 
@@ -726,6 +740,40 @@ export const campaignsApi = {
   },
 }
 
+// --------------- RBAC: Papéis & Permissões ---------------
+
+export const rolesApi = {
+  async list(): Promise<ApiResponse<RolesData>> {
+    return fetchWithAuth('/roles')
+  },
+  async create(data: { name: string; baseRole: string; permissions: string[] }): Promise<ApiResponse<CustomRole>> {
+    return fetchWithAuth('/roles', { method: 'POST', body: JSON.stringify({ name: data.name, base_role: data.baseRole, permissions: data.permissions }) })
+  },
+  async update(id: string, data: { name: string; baseRole: string; permissions: string[] }): Promise<ApiResponse<CustomRole>> {
+    return fetchWithAuth(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify({ name: data.name, base_role: data.baseRole, permissions: data.permissions }) })
+  },
+  async remove(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/roles/${id}`, { method: 'DELETE' })
+  },
+}
+
+// --------------- Estrutura organizacional ---------------
+
+export const orgUnitsApi = {
+  async list(): Promise<ApiResponse<OrgUnit[]>> {
+    return fetchWithAuth('/org-units')
+  },
+  async create(data: { name: string; type: string; parentId?: string | null }): Promise<ApiResponse<OrgUnit>> {
+    return fetchWithAuth('/org-units', { method: 'POST', body: JSON.stringify({ name: data.name, type: data.type, parent_id: data.parentId ?? null }) })
+  },
+  async update(id: string, data: { name: string; type: string; parentId?: string | null }): Promise<ApiResponse<OrgUnit>> {
+    return fetchWithAuth(`/org-units/${id}`, { method: 'PATCH', body: JSON.stringify({ name: data.name, type: data.type, parent_id: data.parentId ?? null }) })
+  },
+  async remove(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/org-units/${id}`, { method: 'DELETE' })
+  },
+}
+
 // --------------- MFA (2FA) ---------------
 
 export const mfaApi = {
@@ -828,6 +876,8 @@ export const api = {
   audit: auditApi,
   mfa: mfaApi,
   sso: ssoApi,
+  roles: rolesApi,
+  orgUnits: orgUnitsApi,
 }
 
 
