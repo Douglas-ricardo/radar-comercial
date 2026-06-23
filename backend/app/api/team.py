@@ -149,6 +149,12 @@ def invite_member(
     # Cobrança per-seat: ajusta a assinatura ao novo nº de usuários.
     sync_subscription_seats(company_id, db)
 
+    from app.services import audit_service
+    audit_service.log_action(db, company_id=company_id, action="team.member_invited",
+                             user_id=token_data.user_id, resource_type="user", resource_id=new_user.id,
+                             details={"email": data.email, "role": data.role})
+    db.commit()
+
     logger.info(
         "team.invite.sent",
         extra={"company_id": company_id, "invited_email": data.email, "role": data.role},
@@ -185,11 +191,18 @@ def remove_member(
     if user_to_delete.id == token_data.user_id:
         raise HTTPException(status_code=400, detail="Não pode remover a sua própria conta.")
 
+    removed_email = user_to_delete.email
     db.delete(user_to_delete)
     db.commit()
 
     # Cobrança per-seat: reduz a assinatura ao novo nº de usuários.
     sync_subscription_seats(token_data.company_id, db)
+
+    from app.services import audit_service
+    audit_service.log_action(db, company_id=token_data.company_id, action="team.member_removed",
+                             user_id=token_data.user_id, resource_type="user", resource_id=user_id,
+                             details={"email": removed_email})
+    db.commit()
 
     logger.info("team.member.removed", extra={"removed_user_id": user_id, "admin_id": token_data.user_id})
 

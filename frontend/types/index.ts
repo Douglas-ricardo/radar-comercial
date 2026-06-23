@@ -29,6 +29,8 @@ export interface User {
     purchaseCycleDays?: number
     /** CIDRs permitidos para login (enterprise). Vazio = sem restrição. */
     ipAllowlist?: string[]
+    /** Retenção de logs de auditoria em dias (default 365). */
+    auditRetentionDays?: number
     ownerId: string
     createdAt: string
     updatedAt: string
@@ -516,6 +518,8 @@ export interface User {
     resourceType: string | null
     resourceId: string | null
     details: Record<string, unknown>
+    ip?: string | null
+    userAgent?: string | null
     createdAt: string
   }
 

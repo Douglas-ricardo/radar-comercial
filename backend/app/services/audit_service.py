@@ -18,6 +18,8 @@ def log_action(
     resource_type: str | None = None,
     resource_id: str | None = None,
     details: dict[str, Any] | None = None,
+    ip: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     """Insere um registro de auditoria de forma best-effort (não bloqueia a operação principal)."""
     try:
@@ -29,6 +31,8 @@ def log_action(
             resource_type=resource_type,
             resource_id=resource_id,
             details=details or {},
+            ip=ip,
+            user_agent=(user_agent or None) and user_agent[:300],
         ))
         db.flush()
     except Exception as exc:

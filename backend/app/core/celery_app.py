@@ -26,7 +26,7 @@ celery_app = Celery(
     "radar_comercial_worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks", "app.workers.webhook_tasks", "app.workers.campaign_tasks"],
+    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks", "app.workers.webhook_tasks", "app.workers.campaign_tasks", "app.workers.compliance_tasks"],
 )
 
 celery_app.conf.update(
@@ -58,6 +58,10 @@ celery_app.conf.update(
         "send-scheduled-reports": {
             "task": "send_scheduled_reports",
             "schedule": crontab(hour=10, minute=0),  # 10:00 UTC = 07:00 BRT
+        },
+        "purge-old-audit-logs": {
+            "task": "purge_old_audit_logs",
+            "schedule": crontab(hour=4, minute=30),  # 04:30 UTC diário
         },
     },
 )

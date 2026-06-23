@@ -387,10 +387,18 @@ export const teamApi = {
 
 export const companyApi = {
   async update(companyId: string, data: Partial<Company>): Promise<ApiResponse<Company>> {
+    // Converte camelCase → snake_case nos campos que o backend espera assim.
+    const body: Record<string, unknown> = { ...data }
+    if ('purchaseCycleDays' in data) { body.purchase_cycle_days = data.purchaseCycleDays; delete body.purchaseCycleDays }
+    if ('ipAllowlist' in data) { body.ip_allowlist = data.ipAllowlist; delete body.ipAllowlist }
+    if ('auditRetentionDays' in data) { body.audit_retention_days = data.auditRetentionDays; delete body.auditRetentionDays }
     return fetchWithAuth(`/company/${companyId}`, {
       method: 'PATCH',
-      body: JSON.stringify(data),
+      body: JSON.stringify(body),
     })
+  },
+  async requestDataExport(companyId: string): Promise<ApiResponse<{ queued: boolean; message: string }>> {
+    return fetchWithAuth(`/company/${companyId}/export-request`, { method: 'POST' })
   },
 }
 
@@ -839,17 +847,32 @@ export const ssoApi = {
 
 // --------------- Auditoria ---------------
 
+export interface AuditFilters {
+  limit?: number
+  offset?: number
+  action?: string
+  userId?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
+function auditQuery(params?: AuditFilters): string {
+  const p = new URLSearchParams()
+  if (params?.limit) p.set('limit', String(params.limit))
+  if (params?.offset) p.set('offset', String(params.offset))
+  if (params?.action) p.set('action', params.action)
+  if (params?.userId) p.set('user_id', params.userId)
+  if (params?.dateFrom) p.set('date_from', params.dateFrom)
+  if (params?.dateTo) p.set('date_to', params.dateTo)
+  return p.size ? `?${p.toString()}` : ''
+}
+
 export const auditApi = {
-  async listLog(
-    companyId: string,
-    params?: { limit?: number; offset?: number; action?: string }
-  ): Promise<ApiResponse<AuditEntry[]>> {
-    const p = new URLSearchParams()
-    if (params?.limit) p.set('limit', String(params.limit))
-    if (params?.offset) p.set('offset', String(params.offset))
-    if (params?.action) p.set('action', params.action)
-    const q = p.size ? `?${p.toString()}` : ''
-    return fetchWithAuth(`/audit/${companyId}/log${q}`)
+  async listLog(companyId: string, params?: AuditFilters): Promise<ApiResponse<AuditEntry[]>> {
+    return fetchWithAuth(`/audit/${companyId}/log${auditQuery(params)}`)
+  },
+  exportUrl(companyId: string, params?: AuditFilters): string {
+    return `${API_BASE_URL}/audit/${companyId}/export${auditQuery({ ...params, limit: undefined, offset: undefined })}`
   },
 }
 

@@ -218,7 +218,8 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
 
     access_token = _issue_login(request, response, db, user, company)
     audit_service.log_action(db, company_id=company.id, action="auth.login",
-                             user_id=user.id, user_name=user.name, details={"ip": ip})
+                             user_id=user.id, user_name=user.name,
+                             ip=ip, user_agent=request.headers.get("user-agent"))
     db.commit()
 
     auth_data = _build_auth_response(access_token, user, company)
@@ -263,7 +264,8 @@ def mfa_verify(request: Request, data: MfaVerifyRequest, response: Response, db:
     company = db.query(Company).filter(Company.id == user.company_id).first()
     access_token = _issue_login(request, response, db, user, company)
     audit_service.log_action(db, company_id=company.id, action="auth.login",
-                             user_id=user.id, user_name=user.name, details={"mfa": True})
+                             user_id=user.id, user_name=user.name, details={"mfa": True},
+                             ip=_client_ip(request), user_agent=request.headers.get("user-agent"))
     db.commit()
 
     auth_data = _build_auth_response(access_token, user, company)
@@ -302,8 +304,14 @@ def logout(
             from app.core.auth import SECRET_KEY, ALGORITHM
             payload = _jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
             sid = payload.get("sid")
+            cid = payload.get("company_id")
+            uid = payload.get("sub")
             if sid:
                 revoke_session(db, sid)
+            if cid:
+                audit_service.log_action(db, company_id=cid, action="auth.logout", user_id=uid,
+                                         ip=_client_ip(request), user_agent=request.headers.get("user-agent"))
+                db.commit()
         except Exception:
             pass
     response.delete_cookie("radar_session")
@@ -410,6 +418,10 @@ def change_password(
     # Reemite o cookie (nova sessão) para o usuário não cair após o bump de cv.
     company = db.query(Company).filter(Company.id == user.company_id).first()
     _issue_login(request, response, db, user, company)
+    audit_service.log_action(db, company_id=user.company_id, action="auth.password_changed",
+                             user_id=user.id, user_name=user.name,
+                             ip=_client_ip(request), user_agent=request.headers.get("user-agent"))
+    db.commit()
 
     logger.info("auth.change_password.success", extra={"user_id": user.id})
     return {"success": True}

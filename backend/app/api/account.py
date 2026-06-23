@@ -27,6 +27,7 @@ class UpdateCompanyRequest(BaseModel):
     cnpj: str | None = None
     purchase_cycle_days: int | None = None
     ip_allowlist: list[str] | None = None
+    audit_retention_days: int | None = None
 
 
 @users_router.patch("/{user_id}")
@@ -99,6 +100,11 @@ def update_company(
             raise HTTPException(status_code=400, detail="Ciclo de compra deve ser entre 1 e 365 dias.")
         company.purchase_cycle_days = data.purchase_cycle_days
 
+    if data.audit_retention_days is not None:
+        if not (30 <= data.audit_retention_days <= 3650):
+            raise HTTPException(status_code=400, detail="Retenção de auditoria deve ser entre 30 e 3650 dias.")
+        company.audit_retention_days = data.audit_retention_days
+
     if data.ip_allowlist is not None:
         # IP allowlist é recurso enterprise. Valida cada CIDR/IP antes de salvar.
         PlanService.require_feature(company, "ip_allowlist")
@@ -130,8 +136,79 @@ def update_company(
             "uploadsUsed": company.uploads_used,
             "purchaseCycleDays": company.purchase_cycle_days,
             "ipAllowlist": company.ip_allowlist or [],
+            "auditRetentionDays": company.audit_retention_days,
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,
         },
     }
+
+
+# ─── Portabilidade de dados (LGPD/GDPR) ───────────────────────────────────────
+
+@company_router.post("/{company_id}/export-request")
+def request_data_export(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Admin solicita exportação completa dos dados — gerada em background, link por e-mail."""
+    if company_id != token_data.company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem exportar dados.")
+
+    from app.workers.compliance_tasks import build_company_export
+    from app.services import audit_service
+    build_company_export.delay(company_id, token_data.user_id)
+    audit_service.log_action(db, company_id=company_id, action="data.export_requested", user_id=token_data.user_id)
+    db.commit()
+    return {"success": True, "data": {"queued": True, "message": "Export em preparação. Você receberá o link por e-mail."}}
+
+
+@company_router.get("/{company_id}/export/download")
+def download_data_export(
+    company_id: str,
+    token: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Baixa o ZIP do export (token de 24h + autenticação de admin da mesma empresa)."""
+    from fastapi.responses import StreamingResponse
+    from app.infrastructure import storage
+    from app.infrastructure.redis_client import redis_client
+    from app.services import audit_service
+
+    if company_id != token_data.company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores.")
+
+    raw = None
+    try:
+        raw = redis_client.get(f"data_export:{token}")
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+    except Exception:
+        pass
+    if not raw or "|" not in raw:
+        raise HTTPException(status_code=404, detail="Link de export expirado ou inválido.")
+    exp_company, ref = raw.split("|", 1)
+    if exp_company != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    local_path = storage.fetch_to_local(ref)
+
+    def _iter():
+        with open(local_path, "rb") as f:
+            yield from f
+        if storage.is_remote_ref(ref):
+            storage.cleanup_local(local_path)
+
+    audit_service.log_action(db, company_id=company_id, action="data.exported", user_id=token_data.user_id)
+    db.commit()
+    return StreamingResponse(
+        _iter(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="radar-export.zip"'},
+    )

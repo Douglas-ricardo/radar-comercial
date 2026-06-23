@@ -30,6 +30,8 @@ class Company(Base):
     ip_allowlist = Column(JSON, default=list)
     # Slug curto e único para URLs de SSO (/sso/{slug}/...). Gerado na 1ª conexão SSO.
     sso_slug = Column(String, nullable=True, unique=True, index=True)
+    # Retenção de logs de auditoria (dias). Task diária purga registros mais antigos.
+    audit_retention_days = Column(Integer, default=365, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -447,6 +449,8 @@ class AuditLog(Base):
     resource_type = Column(String, nullable=True)    # "opportunity" | "user" | "campaign"
     resource_id = Column(String, nullable=True)
     details = Column(JSON, default=dict)
+    ip = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow, index=True)
 
     __table_args__ = (
