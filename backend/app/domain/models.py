@@ -215,6 +215,7 @@ class OpportunityAction(Base):
     expected_value = Column(Float, default=0.0)
     status = Column(String, default="to_contact")  # to_contact | contacted | won | lost
     notes = Column(String, nullable=True)
+    channel = Column(String, nullable=True)  # whatsapp | email | call | in_person | other
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -353,6 +354,41 @@ class OutreachAttribution(Base):
     __table_args__ = (
         Index("ix_outreach_attr_company_status", "company_id", "status"),
     )
+
+
+class SalesTarget(Base):
+    """Meta comercial por filial, vendedor ou empresa — comparada ao gerencial em tempo real."""
+    __tablename__ = "sales_targets"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    key_type = Column(String, nullable=False)   # "branch" | "salesperson" | "company"
+    key_value = Column(String, nullable=True)   # ex: "SP-001" | "João Silva" | null
+    period = Column(String, nullable=False)     # "month" | "quarter" | "year"
+    target_won = Column(Integer, nullable=True)     # meta de oportunidades ganhas
+    target_value = Column(Float, nullable=True)     # meta de valor (R$)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "key_type", "key_value", "period", name="uq_sales_target"),
+    )
+
+
+class ScheduledReport(Base):
+    """Relatório Excel enviado automaticamente por email em frequência configurável."""
+    __tablename__ = "scheduled_reports"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    frequency = Column(String, nullable=False)      # "weekly" | "monthly"
+    day_of_week = Column(Integer, nullable=True)    # 0=Seg … 6=Dom (para weekly)
+    recipients = Column(JSON, default=list)         # [email, ...]
+    date_range = Column(String, default="1m")       # "1m" | "3m" | "6m"
+    enabled = Column(Boolean, default=True, nullable=False)
+    last_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class WebhookConfig(Base):

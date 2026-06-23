@@ -16,12 +16,13 @@ import {
 } from '@/components/ui/dialog'
 import {
   MessageCircle, Mail, Send, Smartphone, CheckCircle2, AlertTriangle, Loader2, Pencil, TrendingUp,
-  ChevronDown, Settings2,
+  ChevronDown, Settings2, Inbox,
 } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
-import type { OutreachConfig, OutreachContact, RecoverySummary, ChurnRiskData } from '@/types'
+import type { OutreachConfig, OutreachContact, RecoverySummary, ChurnRiskData, InboxEntry } from '@/types'
 import { useAuth } from '@/lib/auth/auth-context'
 import { formatCurrency } from '@/lib/format'
 
@@ -34,6 +35,8 @@ function DisparoPageContent() {
   const [contacts, setContacts] = useState<OutreachContact[]>([])
   const [recovery, setRecovery] = useState<RecoverySummary | null>(null)
   const [churn, setChurn] = useState<ChurnRiskData | null>(null)
+  const [inbox, setInbox] = useState<InboxEntry[]>([])
+  const [inboxLoaded, setInboxLoaded] = useState(false)
   const { company } = useAuth()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -154,6 +157,13 @@ function DisparoPageContent() {
       setContacts(prev => prev.map(x => x.customerHash === c.customerHash ? { ...x, optOut: c.optOut } : x))
       toast.error('Não foi possível atualizar o contato.')
     }
+  }
+
+  async function loadInbox() {
+    if (inboxLoaded) return
+    const res = await api.outreach.getInbox()
+    if (res.success && res.data) setInbox(res.data)
+    setInboxLoaded(true)
   }
 
   function openEdit(c: OutreachContact) {
@@ -399,76 +409,160 @@ function DisparoPageContent() {
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Contatos / opt-out */}
-        <Card className="rounded-2xl border border-border bg-card shadow-sm">
-          <CardHeader>
-            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Contatos dos clientes</CardTitle>
-            <CardDescription>
-              Complete telefone/e-mail faltantes e exclua quem não deve receber (opt-out).
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Segmento</TableHead>
-                  <TableHead>Telefone</TableHead>
-                  <TableHead>E-mail</TableHead>
-                  <TableHead className="text-right">Receita</TableHead>
-                  <TableHead className="text-center">Receber</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {contacts.map(c => (
-                  <TableRow key={c.customerHash} className={c.optOut ? 'opacity-50' : ''}>
-                    <TableCell className="font-medium">{c.customerName}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          c.segment === 'lost' ? 'rounded-full border-0 bg-destructive/10 text-destructive'
-                          : c.segment === 'at_risk' ? 'rounded-full border-0 bg-warning/10 text-warning'
-                          : c.segment === 'champion' || c.segment === 'loyal' ? 'rounded-full border-0 bg-success/10 text-success'
-                          : 'rounded-full border-0 bg-muted text-muted-foreground'
-                        }
-                      >
-                        {SEGMENT_LABELS[c.segment] ?? c.segment}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className={c.phone ? 'tabular-nums' : 'text-muted-foreground'}>{c.phone ?? '—'}</TableCell>
-                    <TableCell className={c.email ? '' : 'text-muted-foreground'}>{c.email ?? '—'}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">{formatCurrency(c.totalRevenue)}</TableCell>
-                    <TableCell className="text-center">
-                      <Switch checked={!c.optOut} onCheckedChange={() => toggleOptOut(c)} />
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {contacts.length === 0 && (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="py-12">
-                      <div className="flex flex-col items-center justify-center text-center">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
-                          <Smartphone className="h-7 w-7" />
-                        </div>
-                        <p className="mt-4 font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em] text-foreground">Nenhum cliente ainda</p>
-                        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                          Faça upload de uma planilha com vendas para popular os contatos e começar a disparar.
-                        </p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        {/* Tabs: Contatos + Respostas */}
+        <Tabs defaultValue="contacts" onValueChange={(v) => { if (v === 'inbox') loadInbox() }}>
+          <TabsList>
+            <TabsTrigger value="contacts">
+              <Smartphone className="h-4 w-4 mr-2" />
+              Contatos
+            </TabsTrigger>
+            <TabsTrigger value="inbox">
+              <Inbox className="h-4 w-4 mr-2" />
+              Respostas
+              {(recovery?.repliesCount ?? 0) > 0 && (
+                <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold tabular-nums text-primary">
+                  {recovery?.repliesCount}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="contacts" className="mt-4">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Contatos dos clientes</CardTitle>
+                <CardDescription>
+                  Complete telefone/e-mail faltantes e exclua quem não deve receber (opt-out).
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Segmento</TableHead>
+                      <TableHead>Telefone</TableHead>
+                      <TableHead>E-mail</TableHead>
+                      <TableHead className="text-right">Receita</TableHead>
+                      <TableHead className="text-center">Receber</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {contacts.map(c => (
+                      <TableRow key={c.customerHash} className={c.optOut ? 'opacity-50' : ''}>
+                        <TableCell className="font-medium">{c.customerName}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              c.segment === 'lost' ? 'rounded-full border-0 bg-destructive/10 text-destructive'
+                              : c.segment === 'at_risk' ? 'rounded-full border-0 bg-warning/10 text-warning'
+                              : c.segment === 'champion' || c.segment === 'loyal' ? 'rounded-full border-0 bg-success/10 text-success'
+                              : 'rounded-full border-0 bg-muted text-muted-foreground'
+                            }
+                          >
+                            {SEGMENT_LABELS[c.segment] ?? c.segment}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className={c.phone ? 'tabular-nums' : 'text-muted-foreground'}>{c.phone ?? '—'}</TableCell>
+                        <TableCell className={c.email ? '' : 'text-muted-foreground'}>{c.email ?? '—'}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{formatCurrency(c.totalRevenue)}</TableCell>
+                        <TableCell className="text-center">
+                          <Switch checked={!c.optOut} onCheckedChange={() => toggleOptOut(c)} />
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(c)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {contacts.length === 0 && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={7} className="py-12">
+                          <div className="flex flex-col items-center justify-center text-center">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                              <Smartphone className="h-7 w-7" />
+                            </div>
+                            <p className="mt-4 font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em] text-foreground">Nenhum cliente ainda</p>
+                            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                              Faça upload de uma planilha com vendas para popular os contatos e começar a disparar.
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="inbox" className="mt-4">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Respostas recebidas</CardTitle>
+                <CardDescription>
+                  Mensagens recebidas via WhatsApp dos clientes contatados. Conteúdo não armazenado (LGPD).
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Telefone</TableHead>
+                      <TableHead>Segmento</TableHead>
+                      <TableHead>Recebido em</TableHead>
+                      <TableHead className="text-center">Opt-out</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {inbox.map(entry => (
+                      <TableRow key={entry.id}>
+                        <TableCell className="font-medium">{entry.customerName ?? '—'}</TableCell>
+                        <TableCell className="tabular-nums text-sm">{entry.phone ?? '—'}</TableCell>
+                        <TableCell>
+                          {entry.segment ? (
+                            <Badge variant="outline" className="rounded-full border-0 bg-muted text-muted-foreground text-xs">
+                              {SEGMENT_LABELS[entry.segment] ?? entry.segment}
+                            </Badge>
+                          ) : '—'}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground tabular-nums">
+                          {entry.receivedAt ? new Date(entry.receivedAt).toLocaleString('pt-BR') : '—'}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {entry.optOut ? (
+                            <Badge className="rounded-full border-0 bg-destructive/10 text-destructive text-xs">Descadastrado</Badge>
+                          ) : (
+                            <Badge className="rounded-full border-0 bg-success/10 text-success text-xs">Ativo</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {inboxLoaded && inbox.length === 0 && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={5} className="py-12">
+                          <div className="flex flex-col items-center justify-center text-center">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                              <Inbox className="h-7 w-7" />
+                            </div>
+                            <p className="mt-4 font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em] text-foreground">Nenhuma resposta ainda</p>
+                            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                              As respostas dos clientes via WhatsApp aparecerão aqui após o disparo.
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* QR Code modal */}

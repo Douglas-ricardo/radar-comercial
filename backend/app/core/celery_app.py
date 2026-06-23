@@ -26,7 +26,7 @@ celery_app = Celery(
     "radar_comercial_worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks"],
+    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks", "app.workers.webhook_tasks"],
 )
 
 celery_app.conf.update(
@@ -54,6 +54,10 @@ celery_app.conf.update(
         "process-cadence-steps": {
             "task": "process_cadence_steps",
             "schedule": crontab(minute="*/15"),  # a cada 15 min; processa passos vencidos
+        },
+        "send-scheduled-reports": {
+            "task": "send_scheduled_reports",
+            "schedule": crontab(hour=10, minute=0),  # 10:00 UTC = 07:00 BRT
         },
     },
 )

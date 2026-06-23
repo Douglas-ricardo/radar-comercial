@@ -12,8 +12,9 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel
 from app.core.auth import get_current_user_and_company
-from app.domain.models import ComputedInsights, CustomerProfile
+from app.domain.models import ComputedInsights, CustomerProfile, ScheduledReport
 from app.infrastructure.database import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 
 _VALID_RANGES = {"1m", "3m", "6m", "12m"}
+_VALID_FREQ = {"weekly", "monthly"}
+
+
+class ScheduledReportRequest(BaseModel):
+    frequency: str          # "weekly" | "monthly"
+    day_of_week: int | None = None  # 0=Seg…6=Dom (só weekly)
+    recipients: list[str]   # emails
+    date_range: str = "1m"  # "1m" | "3m" | "6m"
 _HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
 
@@ -150,3 +159,100 @@ def export_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="radar-{date_range}.xlsx"'},
     )
+
+
+# ─── Relatórios Agendados ─────────────────────────────────────────────────────
+
+@router.get("/{company_id}/schedules")
+def list_schedules(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem ver relatórios agendados.")
+
+    schedules = db.query(ScheduledReport).filter_by(company_id=company_id).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": s.id,
+                "frequency": s.frequency,
+                "dayOfWeek": s.day_of_week,
+                "recipients": s.recipients or [],
+                "dateRange": s.date_range,
+                "enabled": s.enabled,
+                "lastSentAt": s.last_sent_at.isoformat() if s.last_sent_at else None,
+                "createdAt": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in schedules
+        ],
+    }
+
+
+@router.post("/{company_id}/schedules")
+def create_schedule(
+    company_id: str,
+    data: ScheduledReportRequest,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem agendar relatórios.")
+    if data.frequency not in _VALID_FREQ:
+        raise HTTPException(status_code=400, detail=f"Frequência inválida: {data.frequency}.")
+    if data.date_range not in _VALID_RANGES:
+        raise HTTPException(status_code=400, detail=f"Período inválido: {data.date_range}.")
+    if not data.recipients:
+        raise HTTPException(status_code=400, detail="Informe ao menos um destinatário.")
+
+    schedule = ScheduledReport(
+        company_id=company_id,
+        frequency=data.frequency,
+        day_of_week=data.day_of_week,
+        recipients=data.recipients,
+        date_range=data.date_range,
+    )
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+
+    logger.info("reports.schedule.created", extra={"company_id": company_id, "frequency": data.frequency})
+    return {
+        "success": True,
+        "data": {
+            "id": schedule.id,
+            "frequency": schedule.frequency,
+            "dayOfWeek": schedule.day_of_week,
+            "recipients": schedule.recipients,
+            "dateRange": schedule.date_range,
+            "enabled": schedule.enabled,
+            "lastSentAt": None,
+            "createdAt": schedule.created_at.isoformat() if schedule.created_at else None,
+        },
+    }
+
+
+@router.delete("/{company_id}/schedules/{schedule_id}")
+def delete_schedule(
+    company_id: str,
+    schedule_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem remover agendamentos.")
+
+    schedule = db.query(ScheduledReport).filter_by(id=schedule_id, company_id=company_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    db.delete(schedule)
+    db.commit()
+    return {"success": True, "message": "Agendamento removido."}

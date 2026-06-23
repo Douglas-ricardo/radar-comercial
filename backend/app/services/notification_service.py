@@ -117,6 +117,45 @@ class NotificationService:
         """
 
     @staticmethod
+    def send_email_with_attachment(
+        to: str,
+        subject: str,
+        html: str,
+        attachment_bytes: bytes,
+        attachment_name: str,
+        attachment_type: str,
+    ) -> bool:
+        """Envia email com anexo binário via Resend (base64 encoded)."""
+        import base64
+        api_key = os.getenv("RESEND_API_KEY")
+        if not api_key:
+            logger.warning("notification.email.resend_not_configured")
+            return False
+        try:
+            import resend
+            resend.api_key = api_key
+            from_email = os.getenv(
+                "RESEND_FROM_EMAIL",
+                "Radar Comercial <noreply@radarcomercial.com.br>",
+            )
+            resend.Emails.send({
+                "from": from_email,
+                "to": [to],
+                "subject": subject,
+                "html": html,
+                "attachments": [{
+                    "filename": attachment_name,
+                    "content": base64.b64encode(attachment_bytes).decode(),
+                    "type": attachment_type,
+                }],
+            })
+            logger.info("notification.email_attachment.sent", extra={"to": to})
+            return True
+        except Exception as exc:
+            logger.error("notification.email_attachment.error", extra={"to": to, "error": str(exc)})
+            return False
+
+    @staticmethod
     def format_opportunity_whatsapp(user_name: str, opportunities: List[Dict]) -> str:
         app_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
         lines = [f"Olá {user_name}! 📊 *Radar Comercial* — oportunidades de hoje:\n"]

@@ -19,13 +19,13 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X, Download, BarChart3 } from 'lucide-react'
+import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X, Download, BarChart3, Target, Plus, Trash2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { api, opportunitiesApi, reportsApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry } from '@/types'
+import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry, SalesTarget } from '@/types'
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   to_contact: 'A contatar',
@@ -57,15 +57,25 @@ interface ActionDialogProps {
   companyId: string
 }
 
+const CHANNEL_LABELS: Record<string, string> = {
+  whatsapp: 'WhatsApp',
+  email: 'Email',
+  call: 'Ligação',
+  in_person: 'Presencial',
+  other: 'Outro',
+}
+
 function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
   const [status, setStatus] = useState<OpportunityStatus>('to_contact')
   const [notes, setNotes] = useState('')
+  const [channel, setChannel] = useState<string>('')
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     if (opp) {
       setStatus(opp.action.status)
       setNotes(opp.action.notes ?? '')
+      setChannel(opp.action.channel ?? '')
     }
   }, [opp])
 
@@ -79,6 +89,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
         expected_value: opp.expectedValue,
         status,
         notes: notes || null,
+        channel: channel || null,
       })
       if (res.success) {
         toast.success('Ação registrada.')
@@ -107,14 +118,22 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
         <Field>
           <FieldLabel>Status comercial</FieldLabel>
           <Select value={status} onValueChange={(v) => setStatus(v as OpportunityStatus)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {(Object.keys(STATUS_LABELS) as OpportunityStatus[]).map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </SelectItem>
+                <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel>Canal de conversão</FieldLabel>
+          <Select value={channel} onValueChange={setChannel}>
+            <SelectTrigger><SelectValue placeholder="Selecione o canal (opcional)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Não informado</SelectItem>
+              {Object.entries(CHANNEL_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>{l}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -149,6 +168,9 @@ export default function CarteiraPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedOpp, setSelectedOpp] = useState<CarteiraOpportunity | null>(null)
   const [gerencial, setGerencial] = useState<GerencialData | null>(null)
+  const [targets, setTargets] = useState<SalesTarget[]>([])
+  const [targetDialog, setTargetDialog] = useState(false)
+  const [newTarget, setNewTarget] = useState({ keyType: 'branch', keyValue: '', period: 'month', targetValue: '', targetWon: '' })
   const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
     open: false, text: '', loading: false,
   })
@@ -179,17 +201,48 @@ export default function CarteiraPage() {
       api.carteira.list(company.id, undefined, branch || undefined, salesperson || undefined),
       api.carteira.getRanking(company.id),
     ]
-    if (isAdmin) requests.push(api.carteira.getGerencial(company.id))
-    const [oppsRes, rankRes, gerencialRes] = await Promise.all(requests) as [
+    if (isAdmin) {
+      requests.push(api.carteira.getGerencial(company.id))
+      requests.push(api.carteira.listTargets(company.id))
+    }
+    const [oppsRes, rankRes, gerencialRes, targetsRes] = await Promise.all(requests) as [
       Awaited<ReturnType<typeof api.carteira.list>>,
       Awaited<ReturnType<typeof api.carteira.getRanking>>,
       Awaited<ReturnType<typeof api.carteira.getGerencial>> | undefined,
+      Awaited<ReturnType<typeof api.carteira.listTargets>> | undefined,
     ]
     if (oppsRes.success && oppsRes.data) setOpportunities(oppsRes.data)
     if (rankRes.success && rankRes.data) setRanking(rankRes.data)
     if (gerencialRes?.success && gerencialRes?.data) setGerencial(gerencialRes.data)
+    if (targetsRes?.success && targetsRes?.data) setTargets(targetsRes.data)
     setIsLoading(false)
   }, [company?.id, isAdmin])
+
+  const handleSaveTarget = async () => {
+    if (!company?.id) return
+    const res = await api.carteira.upsertTarget(company.id, {
+      keyType: newTarget.keyType,
+      keyValue: newTarget.keyValue || null,
+      period: newTarget.period,
+      targetValue: newTarget.targetValue ? parseFloat(newTarget.targetValue) : null,
+      targetWon: newTarget.targetWon ? parseInt(newTarget.targetWon) : null,
+    })
+    if (res.success) {
+      toast.success('Meta salva.')
+      setTargetDialog(false)
+      setNewTarget({ keyType: 'branch', keyValue: '', period: 'month', targetValue: '', targetWon: '' })
+      load()
+    } else {
+      toast.error(res.error ?? 'Erro ao salvar meta.')
+    }
+  }
+
+  const handleDeleteTarget = async (targetId: string) => {
+    if (!company?.id) return
+    const res = await api.carteira.deleteTarget(company.id, targetId)
+    if (res.success) { toast.success('Meta removida.'); load() }
+    else toast.error(res.error ?? 'Erro.')
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -514,6 +567,77 @@ export default function CarteiraPage() {
                     </div>
                   )}
 
+                  {/* Metas Comerciais */}
+                  <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                          <Target className="h-4 w-4" />
+                          Metas Comerciais
+                        </CardTitle>
+                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setTargetDialog(true)}>
+                          <Plus className="h-3.5 w-3.5" />
+                          Definir meta
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {targets.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma meta definida. Clique em "Definir meta" para começar.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {targets.map((t) => {
+                            const label = t.keyType === 'company' ? 'Empresa' : (t.keyValue ?? '—')
+                            const periodLabel = { month: 'Mensal', quarter: 'Trimestral', year: 'Anual' }[t.period] ?? t.period
+                            // encontra actual para este target
+                            let actual = 0
+                            if (t.keyType === 'branch') {
+                              const row = gerencial?.by_branch.find(b => b.branch === t.keyValue)
+                              actual = t.targetValue ? (row?.wonValue ?? 0) : (row?.won ?? 0)
+                            } else if (t.keyType === 'salesperson') {
+                              const row = gerencial?.by_salesperson.find(s => s.salesperson === t.keyValue)
+                              actual = t.targetValue ? (row?.wonValue ?? 0) : (row?.won ?? 0)
+                            } else {
+                              actual = t.targetValue ? (gerencial?.totals.wonValue ?? 0) : (gerencial?.totals.won ?? 0)
+                            }
+                            const targetNum = t.targetValue ?? t.targetWon ?? 1
+                            const pct = Math.min(Math.round((actual / targetNum) * 100), 100)
+                            return (
+                              <div key={t.id} className="rounded-xl border border-border bg-secondary/30 p-3">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <div>
+                                    <span className="text-sm font-semibold text-foreground">{label}</span>
+                                    <span className="ml-2 text-xs text-muted-foreground">{periodLabel}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                                      {t.targetValue
+                                        ? `${formatCurrency(actual)} / ${formatCurrency(t.targetValue)}`
+                                        : `${actual} / ${t.targetWon} ganhos`}
+                                    </span>
+                                    <button
+                                      onClick={() => handleDeleteTarget(t.id)}
+                                      className="text-muted-foreground hover:text-destructive transition-colors"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                  <div
+                                    className={cn('h-full rounded-full transition-all', pct >= 100 ? 'bg-success' : pct >= 60 ? 'bg-primary' : 'bg-warning')}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <p className="mt-1 text-right text-xs font-medium tabular-nums text-muted-foreground">{pct}%</p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
                   {/* Por Filial */}
                   {gerencial.by_branch.length > 0 && (
                     <Card className="rounded-2xl border border-border bg-card shadow-sm">
@@ -600,6 +724,70 @@ export default function CarteiraPage() {
         onSaved={load}
         companyId={company?.id ?? ''}
       />
+
+      {/* ── Dialog: definir meta ────────────────────────────────────── */}
+      <Dialog open={targetDialog} onOpenChange={setTargetDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Definir Meta</DialogTitle>
+            <DialogDescription>A meta é comparada com os dados do Gerencial em tempo real.</DialogDescription>
+          </DialogHeader>
+          <Field>
+            <FieldLabel>Tipo</FieldLabel>
+            <Select value={newTarget.keyType} onValueChange={(v) => setNewTarget(t => ({ ...t, keyType: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="branch">Filial</SelectItem>
+                <SelectItem value="salesperson">Vendedor</SelectItem>
+                <SelectItem value="company">Empresa (geral)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {newTarget.keyType !== 'company' && (
+            <Field>
+              <FieldLabel>{newTarget.keyType === 'branch' ? 'Nome da filial' : 'Nome do vendedor'}</FieldLabel>
+              <Input
+                placeholder="ex: SP-001"
+                value={newTarget.keyValue}
+                onChange={(e) => setNewTarget(t => ({ ...t, keyValue: e.target.value }))}
+              />
+            </Field>
+          )}
+          <Field>
+            <FieldLabel>Período</FieldLabel>
+            <Select value={newTarget.period} onValueChange={(v) => setNewTarget(t => ({ ...t, period: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="month">Mensal</SelectItem>
+                <SelectItem value="quarter">Trimestral</SelectItem>
+                <SelectItem value="year">Anual</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel>Meta de receita (R$)</FieldLabel>
+            <Input
+              type="number"
+              placeholder="ex: 50000"
+              value={newTarget.targetValue}
+              onChange={(e) => setNewTarget(t => ({ ...t, targetValue: e.target.value }))}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>Meta de oportunidades ganhas</FieldLabel>
+            <Input
+              type="number"
+              placeholder="ex: 10"
+              value={newTarget.targetWon}
+              onChange={(e) => setNewTarget(t => ({ ...t, targetWon: e.target.value }))}
+            />
+          </Field>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTargetDialog(false)}>Cancelar</Button>
+            <Button onClick={handleSaveTarget}>Salvar meta</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Modal de mensagem gerada por IA ────────────────────────────── */}
       <Dialog open={msgModal.open} onOpenChange={(open) => setMsgModal(m => ({ ...m, open }))}>

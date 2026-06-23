@@ -19,10 +19,12 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
-import { Building2, User, CreditCard, Lock, Bell, Send } from 'lucide-react'
+import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
-import type { NotificationPreference } from '@/types'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import type { NotificationPreference, ScheduledReport } from '@/types'
 
 export default function SettingsPage() {
   const { user, company, updateUser, updateCompany } = useAuth()
@@ -35,6 +37,9 @@ export default function SettingsPage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [isSavingNotif, setIsSavingNotif] = useState(false)
   const [isSendingTest, setIsSendingTest] = useState(false)
+  const [schedules, setSchedules] = useState<ScheduledReport[]>([])
+  const [scheduleDialog, setScheduleDialog] = useState(false)
+  const [newSchedule, setNewSchedule] = useState({ frequency: 'weekly', dayOfWeek: '1', recipients: '', dateRange: '1m' })
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreference>({
     enabled: true,
     emailEnabled: true,
@@ -61,7 +66,12 @@ export default function SettingsPage() {
     api.notifications.getPreferences().then((res) => {
       if (res.success && res.data) setNotifPrefs(res.data)
     })
-  }, [])
+    if (company?.id) {
+      api.reports.listSchedules(company.id).then((res) => {
+        if (res.success && res.data) setSchedules(res.data)
+      })
+    }
+  }, [company?.id])
 
   const handleSaveNotifications = async () => {
     setIsSavingNotif(true)
@@ -134,6 +144,38 @@ export default function SettingsPage() {
     }
   }
 
+  const handleCreateSchedule = async () => {
+    if (!company?.id) return
+    const recipientList = newSchedule.recipients.split(',').map(e => e.trim()).filter(Boolean)
+    if (!recipientList.length) { toast.error('Informe ao menos um destinatário.'); return }
+    const res = await api.reports.createSchedule(company.id, {
+      frequency: newSchedule.frequency,
+      dayOfWeek: newSchedule.frequency === 'weekly' ? parseInt(newSchedule.dayOfWeek) : null,
+      recipients: recipientList,
+      dateRange: newSchedule.dateRange,
+    })
+    if (res.success) {
+      toast.success('Relatório agendado.')
+      setScheduleDialog(false)
+      setNewSchedule({ frequency: 'weekly', dayOfWeek: '1', recipients: '', dateRange: '1m' })
+      const listRes = await api.reports.listSchedules(company.id)
+      if (listRes.success && listRes.data) setSchedules(listRes.data)
+    } else {
+      toast.error(res.error ?? 'Erro ao criar agendamento.')
+    }
+  }
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!company?.id) return
+    const res = await api.reports.deleteSchedule(company.id, id)
+    if (res.success) {
+      toast.success('Agendamento removido.')
+      setSchedules(prev => prev.filter(s => s.id !== id))
+    } else {
+      toast.error(res.error ?? 'Erro ao remover.')
+    }
+  }
+
   // Persiste dados da empresa no backend e atualiza contexto local
   const handleSaveCompany = async () => {
     if (!company?.id) return
@@ -156,7 +198,64 @@ export default function SettingsPage() {
     }
   }
 
+  const DAY_LABELS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+
   return (
+    <>
+    <Dialog open={scheduleDialog} onOpenChange={setScheduleDialog}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Agendar Relatório</DialogTitle>
+          <DialogDescription>O relatório Excel será enviado por email automaticamente.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Frequência</label>
+            <Select value={newSchedule.frequency} onValueChange={(v) => setNewSchedule(s => ({ ...s, frequency: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="weekly">Semanal</SelectItem>
+                <SelectItem value="monthly">Mensal (todo dia 1)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {newSchedule.frequency === 'weekly' && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Dia da semana</label>
+              <Select value={newSchedule.dayOfWeek} onValueChange={(v) => setNewSchedule(s => ({ ...s, dayOfWeek: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DAY_LABELS.map((d, i) => <SelectItem key={i} value={String(i)}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Período do relatório</label>
+            <Select value={newSchedule.dateRange} onValueChange={(v) => setNewSchedule(s => ({ ...s, dateRange: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1m">Último mês</SelectItem>
+                <SelectItem value="3m">Últimos 3 meses</SelectItem>
+                <SelectItem value="6m">Últimos 6 meses</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Destinatários (separados por vírgula)</label>
+            <Input
+              placeholder="gerente@empresa.com, diretoria@empresa.com"
+              value={newSchedule.recipients}
+              onChange={(e) => setNewSchedule(s => ({ ...s, recipients: e.target.value }))}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setScheduleDialog(false)}>Cancelar</Button>
+          <Button onClick={handleCreateSchedule}>Agendar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="flex flex-col">
       <DashboardHeader
         title="Configurações"
@@ -505,6 +604,52 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
+
+
+            {/* Relatórios Agendados — admin only */}
+            {isAdmin && (
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                          <Calendar className="h-4 w-4 text-primary" />
+                        </span>
+                        Relatórios automáticos
+                      </CardTitle>
+                      <CardDescription>Envie o relatório Excel automaticamente por email em uma frequência definida.</CardDescription>
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setScheduleDialog(true)}>
+                      <Plus className="h-4 w-4" />
+                      Agendar
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {schedules.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-2 text-center">Nenhum relatório agendado. Clique em "Agendar" para criar.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {schedules.map(s => {
+                        const freqLabel = s.frequency === 'weekly' ? `Semanal (${['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'][s.dayOfWeek ?? 0]})` : 'Mensal (dia 1)'
+                        return (
+                          <div key={s.id} className="flex items-center justify-between rounded-xl border border-border bg-secondary/30 px-4 py-3">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{freqLabel} · {s.dateRange}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{(s.recipients ?? []).join(', ')}</p>
+                            </div>
+                            <button onClick={() => handleDeleteSchedule(s.id)} className="text-muted-foreground hover:text-destructive transition-colors ml-3 shrink-0">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>}
 
           {/* Aba Plano — admin only */}
@@ -553,5 +698,6 @@ export default function SettingsPage() {
         </Tabs>
       </div>
     </div>
+    </>
   )
 }

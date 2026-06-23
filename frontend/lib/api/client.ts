@@ -30,6 +30,9 @@ import type {
   RecoverySummary,
   ChurnRiskData,
   GerencialData,
+  SalesTarget,
+  ScheduledReport,
+  InboxEntry,
   WebhookConfig,
   WebhookDelivery,
 } from '@/types'
@@ -441,6 +444,7 @@ export const carteiraApi = {
       expected_value: number
       status: OpportunityStatus
       notes?: string | null
+      channel?: string | null
     }
   ): Promise<ApiResponse<void>> {
     return fetchWithAuth(`/carteira/${companyId}/actions`, {
@@ -455,6 +459,31 @@ export const carteiraApi = {
 
   async getGerencial(companyId: string): Promise<ApiResponse<GerencialData>> {
     return fetchWithAuth(`/carteira/${companyId}/gerencial`)
+  },
+
+  async listTargets(companyId: string, period?: string): Promise<ApiResponse<SalesTarget[]>> {
+    const q = period ? `?period=${period}` : ''
+    return fetchWithAuth(`/carteira/${companyId}/targets${q}`)
+  },
+
+  async upsertTarget(
+    companyId: string,
+    data: { keyType: string; keyValue?: string | null; period: string; targetWon?: number | null; targetValue?: number | null }
+  ): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/carteira/${companyId}/targets`, {
+      method: 'POST',
+      body: JSON.stringify({
+        key_type: data.keyType,
+        key_value: data.keyValue ?? null,
+        period: data.period,
+        target_won: data.targetWon ?? null,
+        target_value: data.targetValue ?? null,
+      }),
+    })
+  },
+
+  async deleteTarget(companyId: string, targetId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/carteira/${companyId}/targets/${targetId}`, { method: 'DELETE' })
   },
 }
 
@@ -522,6 +551,13 @@ export const outreachApi = {
   async getRecovery(): Promise<ApiResponse<RecoverySummary>> {
     return fetchWithAuth('/outreach/recovery')
   },
+  async getInbox(params?: { limit?: number; offset?: number }): Promise<ApiResponse<InboxEntry[]>> {
+    const p = new URLSearchParams()
+    if (params?.limit) p.set('limit', String(params.limit))
+    if (params?.offset) p.set('offset', String(params.offset))
+    const q = p.size ? `?${p.toString()}` : ''
+    return fetchWithAuth(`/outreach/inbox${q}`)
+  },
 }
 
 // --------------- Reports ---------------
@@ -537,6 +573,29 @@ export const reportsApi = {
     if (params?.salesperson) p.set('salesperson', params.salesperson)
     const q = p.size ? `?${p.toString()}` : ''
     return `${API_BASE_URL}/reports/${companyId}/excel${q}`
+  },
+
+  async listSchedules(companyId: string): Promise<ApiResponse<ScheduledReport[]>> {
+    return fetchWithAuth(`/reports/${companyId}/schedules`)
+  },
+
+  async createSchedule(
+    companyId: string,
+    data: { frequency: string; dayOfWeek?: number | null; recipients: string[]; dateRange?: string }
+  ): Promise<ApiResponse<ScheduledReport>> {
+    return fetchWithAuth(`/reports/${companyId}/schedules`, {
+      method: 'POST',
+      body: JSON.stringify({
+        frequency: data.frequency,
+        day_of_week: data.dayOfWeek ?? null,
+        recipients: data.recipients,
+        date_range: data.dateRange ?? '1m',
+      }),
+    })
+  },
+
+  async deleteSchedule(companyId: string, scheduleId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/reports/${companyId}/schedules/${scheduleId}`, { method: 'DELETE' })
   },
 }
 
@@ -586,5 +645,6 @@ export const api = {
   reports: reportsApi,
   webhooks: webhooksApi,
 }
+
 
 export default api

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from app.core.clock import utcnow
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -330,6 +330,67 @@ def recovery_summary(token=Depends(require_analyst_or_above), db: Session = Depe
                 for a in recent
             ],
         },
+    }
+
+
+@router.get("/inbox")
+def get_inbox(
+    token=Depends(require_analyst_or_above),
+    db: Session = Depends(get_db_session),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    Caixa de entrada: mensagens recebidas dos clientes via WhatsApp.
+    Armazenadas como OutreachLog channel='whatsapp_in' — sem texto (LGPD).
+    """
+    total = db.query(OutreachLog).filter(
+        OutreachLog.company_id == token.company_id,
+        OutreachLog.channel == "whatsapp_in",
+    ).count()
+
+    logs = (
+        db.query(OutreachLog)
+        .filter(
+            OutreachLog.company_id == token.company_id,
+            OutreachLog.channel == "whatsapp_in",
+        )
+        .order_by(OutreachLog.sent_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    # Batch-join com CustomerProfile para pegar phone/segment
+    hashes = [log.customer_hash for log in logs]
+    profiles_q = db.query(
+        CustomerProfile.customer_hash,
+        CustomerProfile.phone,
+        CustomerProfile.segment,
+        CustomerProfile.contact_opt_out,
+    ).filter(
+        CustomerProfile.company_id == token.company_id,
+        CustomerProfile.customer_hash.in_(hashes),
+    ).all()
+    profile_map = {r[0]: {"phone": r[1], "segment": r[2], "optOut": r[3]} for r in profiles_q}
+
+    data = []
+    for log in logs:
+        prof = profile_map.get(log.customer_hash, {})
+        data.append({
+            "id": log.id,
+            "customerHash": log.customer_hash,
+            "customerName": log.customer_name,
+            "phone": prof.get("phone"),
+            "segment": prof.get("segment"),
+            "optOut": prof.get("optOut", False),
+            "receivedAt": log.sent_at.isoformat() if log.sent_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": data,
+        "pagination": {"total": total, "limit": limit, "offset": offset},
     }
 
 

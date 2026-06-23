@@ -261,6 +261,7 @@ export interface User {
   export interface OpportunityAction {
     status: OpportunityStatus
     notes: string | null
+    channel: string | null
     updatedAt: string | null
   }
 
@@ -376,6 +377,43 @@ export interface User {
       won: number
       wonValue: number
     }
+  }
+
+  // --------------- Metas Comerciais ---------------
+
+  export interface SalesTarget {
+    id: string
+    keyType: 'branch' | 'salesperson' | 'company'
+    keyValue: string | null
+    period: 'month' | 'quarter' | 'year'
+    targetWon: number | null
+    targetValue: number | null
+    createdAt: string
+  }
+
+  // --------------- Relatórios Agendados ---------------
+
+  export interface ScheduledReport {
+    id: string
+    frequency: 'weekly' | 'monthly'
+    dayOfWeek: number | null
+    recipients: string[]
+    dateRange: string
+    enabled: boolean
+    lastSentAt: string | null
+    createdAt: string
+  }
+
+  // --------------- Inbox de Respostas ---------------
+
+  export interface InboxEntry {
+    id: string
+    customerHash: string
+    customerName: string | null
+    phone: string | null
+    segment: string | null
+    optOut: boolean
+    receivedAt: string
   }
 
   // --------------- Webhooks ---------------

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_and_company
-from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, User
+from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, SalesTarget, User
 from app.infrastructure.database import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,15 @@ class UpsertActionRequest(BaseModel):
     expected_value: float
     status: OpportunityStatus
     notes: Optional[str] = None
+    channel: Optional[str] = None  # whatsapp | email | call | in_person | other
+
+
+class SalesTargetRequest(BaseModel):
+    key_type: str   # "branch" | "salesperson" | "company"
+    key_value: Optional[str] = None
+    period: str     # "month" | "quarter" | "year"
+    target_won: Optional[int] = None
+    target_value: Optional[float] = None
 
 
 @router.get("/{company_id}")
@@ -105,6 +114,7 @@ def list_carteira(
             "action": {
                 "status": opp_status,
                 "notes": action.notes if action else None,
+                "channel": action.channel if action else None,
                 "updatedAt": action.updated_at.isoformat() if action and action.updated_at else None,
             },
         })
@@ -140,6 +150,8 @@ def upsert_action(
         existing.notes = data.notes
         existing.customer_name = data.customer_name
         existing.expected_value = data.expected_value
+        if data.channel is not None:
+            existing.channel = data.channel
     else:
         db.add(OpportunityAction(
             company_id=company_id,
@@ -149,6 +161,7 @@ def upsert_action(
             expected_value=data.expected_value,
             status=data.status,
             notes=data.notes,
+            channel=data.channel,
         ))
 
     db.commit()
@@ -350,3 +363,108 @@ def get_gerencial(
             },
         },
     }
+
+
+# ─── Metas Comerciais ─────────────────────────────────────────────────────────
+
+_VALID_KEY_TYPES = {"branch", "salesperson", "company"}
+_VALID_PERIODS = {"month", "quarter", "year"}
+
+
+@router.get("/{company_id}/targets")
+def list_targets(
+    company_id: str,
+    period: Optional[str] = Query(default=None),
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Lista metas comerciais da empresa. Apenas admin."""
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem ver metas.")
+
+    q = db.query(SalesTarget).filter_by(company_id=company_id)
+    if period:
+        q = q.filter(SalesTarget.period == period)
+    targets = q.order_by(SalesTarget.key_type, SalesTarget.key_value).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": t.id,
+                "keyType": t.key_type,
+                "keyValue": t.key_value,
+                "period": t.period,
+                "targetWon": t.target_won,
+                "targetValue": t.target_value,
+                "createdAt": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in targets
+        ],
+    }
+
+
+@router.post("/{company_id}/targets")
+def upsert_target(
+    company_id: str,
+    data: SalesTargetRequest,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Cria ou atualiza uma meta. Chave única: (key_type, key_value, period)."""
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem definir metas.")
+    if data.key_type not in _VALID_KEY_TYPES:
+        raise HTTPException(status_code=400, detail=f"key_type inválido: {data.key_type}.")
+    if data.period not in _VALID_PERIODS:
+        raise HTTPException(status_code=400, detail=f"Período inválido: {data.period}.")
+
+    existing = db.query(SalesTarget).filter_by(
+        company_id=company_id,
+        key_type=data.key_type,
+        key_value=data.key_value,
+        period=data.period,
+    ).first()
+
+    if existing:
+        existing.target_won = data.target_won
+        existing.target_value = data.target_value
+    else:
+        db.add(SalesTarget(
+            company_id=company_id,
+            key_type=data.key_type,
+            key_value=data.key_value,
+            period=data.period,
+            target_won=data.target_won,
+            target_value=data.target_value,
+        ))
+
+    db.commit()
+    logger.info("carteira.target.upserted", extra={"company_id": company_id, "key_type": data.key_type})
+    return {"success": True, "message": "Meta salva com sucesso."}
+
+
+@router.delete("/{company_id}/targets/{target_id}")
+def delete_target(
+    company_id: str,
+    target_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Remove uma meta comercial."""
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem remover metas.")
+
+    target = db.query(SalesTarget).filter_by(id=target_id, company_id=company_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Meta não encontrada.")
+
+    db.delete(target)
+    db.commit()
+    return {"success": True, "message": "Meta removida."}
