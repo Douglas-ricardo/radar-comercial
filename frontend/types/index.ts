@@ -440,3 +440,59 @@ export interface User {
     attempts: number
     createdAt: string
   }
+
+  // --------------- Templates de Mensagem ---------------
+
+  export interface MessageTemplate {
+    id: string
+    name: string
+    segment: 'at_risk' | 'lost' | 'all'
+    content: string
+    isActive: boolean
+    createdAt: string
+    updatedAt: string
+  }
+
+  // --------------- Campanhas ---------------
+
+  export interface Campaign {
+    id: string
+    name: string
+    segment: string | null
+    branch: string | null
+    salesperson: string | null
+    messageContent: string
+    status: 'draft' | 'sending' | 'sent' | 'failed'
+    targetCount: number
+    sentCount: number
+    createdAt: string
+    sentAt: string | null
+  }
+
+  // --------------- Log de Auditoria ---------------
+
+  export interface AuditEntry {
+    id: string
+    userId: string | null
+    userName: string | null
+    action: string
+    resourceType: string | null
+    resourceId: string | null
+    details: Record<string, unknown>
+    createdAt: string
+  }
+
+  // --------------- Previsão de Receita ---------------
+
+  export interface ForecastMonth {
+    month: string
+    projectedRevenue: number
+    confidenceLow: number
+    confidenceHigh: number
+  }
+
+  export interface ForecastData {
+    months: ForecastMonth[]
+    trend: 'up' | 'down' | 'flat'
+    avgMonthlyGrowth: number
+  }

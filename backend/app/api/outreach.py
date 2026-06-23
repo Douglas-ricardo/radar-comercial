@@ -14,7 +14,7 @@ from app.core.auth import get_current_user_and_company, require_analyst_or_above
 from app.core.rate_limit import limiter
 from app.core.unsubscribe import verify_unsubscribe_token
 from app.core.webhook_sign import make_webhook_token, verify_webhook_token
-from app.domain.models import Company, CustomerProfile, OutreachConfig, OutreachLog, ContactOptOut, OutreachAttribution
+from app.domain.models import Company, CustomerProfile, OutreachConfig, OutreachLog, ContactOptOut, OutreachAttribution, MessageTemplate
 from app.infrastructure.database import get_db_session
 from app.services import evolution_client, outreach_service
 from data_engine.etl import normalize_phone_br
@@ -42,6 +42,13 @@ class ContactUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     contact_opt_out: Optional[bool] = None
+
+
+class MessageTemplateRequest(BaseModel):
+    name: str
+    segment: str   # "at_risk" | "lost" | "all"
+    content: str
+    is_active: bool = True
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -391,6 +398,93 @@ def get_inbox(
         "success": True,
         "data": data,
         "pagination": {"total": total, "limit": limit, "offset": offset},
+    }
+
+
+# ─── Templates de Mensagem ────────────────────────────────────────────────────
+
+_VALID_SEGMENTS = {"at_risk", "lost", "all"}
+
+
+@router.get("/templates")
+def list_templates(token=Depends(require_analyst_or_above), db: Session = Depends(get_db_session)):
+    templates = db.query(MessageTemplate).filter_by(company_id=token.company_id).order_by(MessageTemplate.created_at).all()
+    return {"success": True, "data": [_serialize_template(t) for t in templates]}
+
+
+@router.post("/templates")
+def create_template(
+    data: MessageTemplateRequest,
+    token=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    if data.segment not in _VALID_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"Segmento inválido. Use: {', '.join(_VALID_SEGMENTS)}.")
+    if not data.content.strip():
+        raise HTTPException(status_code=400, detail="Conteúdo não pode ser vazio.")
+    t = MessageTemplate(
+        company_id=token.company_id,
+        name=data.name.strip(),
+        segment=data.segment,
+        content=data.content.strip(),
+        is_active=data.is_active,
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return {"success": True, "data": _serialize_template(t)}
+
+
+@router.put("/templates/{template_id}")
+def update_template(
+    template_id: str,
+    data: MessageTemplateRequest,
+    token=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    t = db.query(MessageTemplate).filter_by(id=template_id, company_id=token.company_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Template não encontrado.")
+    if data.segment not in _VALID_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"Segmento inválido. Use: {', '.join(_VALID_SEGMENTS)}.")
+    t.name = data.name.strip()
+    t.segment = data.segment
+    t.content = data.content.strip()
+    t.is_active = data.is_active
+    db.commit()
+    db.refresh(t)
+    return {"success": True, "data": _serialize_template(t)}
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(
+    template_id: str,
+    token=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    if token.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    t = db.query(MessageTemplate).filter_by(id=template_id, company_id=token.company_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Template não encontrado.")
+    db.delete(t)
+    db.commit()
+    return {"success": True}
+
+
+def _serialize_template(t: MessageTemplate) -> dict:
+    return {
+        "id": t.id,
+        "name": t.name,
+        "segment": t.segment,
+        "content": t.content,
+        "isActive": t.is_active,
+        "createdAt": t.created_at.isoformat() if t.created_at else None,
+        "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
     }
 
 

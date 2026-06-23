@@ -21,6 +21,7 @@ import {
   Plug2,
   Send,
   CreditCard,
+  Megaphone,
   type LucideIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -42,7 +43,8 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
     items: [
       { name: 'Visão geral', href: '/dashboard', icon: LayoutDashboard, badge: null },
       { name: 'Carteira', href: '/dashboard/carteira', icon: Briefcase, badge: null },
-      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: 'novo', roles: ['admin', 'analyst'] },
+      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: null, roles: ['admin', 'analyst'] },
+      { name: 'Campanhas', href: '/dashboard/campanhas', icon: Megaphone, badge: null, roles: ['admin', 'analyst'] },
     ],
   },
   {

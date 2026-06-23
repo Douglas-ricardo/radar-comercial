@@ -165,3 +165,71 @@ def export_insights_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/{company_id}/forecast")
+def get_forecast(
+    company_id: str,
+    date_range: str = Query("6m"),
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Previsão de receita para os próximos 3 meses com base na série histórica."""
+    if str(token_data.company_id) != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    if date_range not in VALID_DATE_RANGES:
+        raise HTTPException(status_code=400, detail=f"Período inválido: '{date_range}'.")
+
+    row = db.query(ComputedInsights).filter_by(company_id=company_id, date_range=date_range).first()
+    if not row or not row.charts:
+        raise HTTPException(status_code=404, detail="Nenhum dado encontrado. Faça upload de uma planilha primeiro.")
+
+    series = (row.charts.get("timeSeries") or [])
+    revenues = [float(p.get("receita", 0) or 0) for p in series if p.get("receita") is not None]
+
+    if len(revenues) < 2:
+        raise HTTPException(status_code=422, detail="Dados insuficientes para previsão (mínimo 2 meses).")
+
+    # Média de variação dos últimos N meses (usa todos disponíveis, máx 6)
+    window = revenues[-6:] if len(revenues) > 6 else revenues
+    deltas = [window[i] - window[i - 1] for i in range(1, len(window))]
+    avg_delta = sum(deltas) / len(deltas) if deltas else 0.0
+    last_value = revenues[-1]
+
+    # Último mês do histórico para nomear os próximos
+    import calendar
+    last_month_str = (series[-1].get("month") or "") if series else ""
+    try:
+        last_dt = datetime.strptime(last_month_str, "%Y-%m")
+    except ValueError:
+        try:
+            last_dt = datetime.strptime(last_month_str, "%b %Y")
+        except ValueError:
+            last_dt = datetime.utcnow().replace(day=1)
+
+    forecast_months = []
+    std_dev = (sum((d - avg_delta) ** 2 for d in deltas) / len(deltas)) ** 0.5 if len(deltas) > 1 else abs(avg_delta) * 0.2
+    current = last_value
+    for i in range(1, 4):
+        month_num = (last_dt.month + i - 1) % 12 + 1
+        year = last_dt.year + (last_dt.month + i - 1) // 12
+        label = f"{calendar.month_abbr[month_num]} {year}"
+        projected = max(0.0, current + avg_delta)
+        forecast_months.append({
+            "month": label,
+            "projectedRevenue": round(projected, 2),
+            "confidenceLow": round(max(0.0, projected - std_dev * 1.5), 2),
+            "confidenceHigh": round(projected + std_dev * 1.5, 2),
+        })
+        current = projected
+
+    trend = "up" if avg_delta > 0 else ("down" if avg_delta < 0 else "flat")
+    return {
+        "success": True,
+        "data": {
+            "months": forecast_months,
+            "trend": trend,
+            "avgMonthlyGrowth": round(avg_delta, 2),
+        },
+    }

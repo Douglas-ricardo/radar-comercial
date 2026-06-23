@@ -19,12 +19,13 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
-import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar } from 'lucide-react'
+import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import type { NotificationPreference, ScheduledReport } from '@/types'
+import { Badge } from '@/components/ui/badge'
+import type { NotificationPreference, ScheduledReport, AuditEntry } from '@/types'
 
 export default function SettingsPage() {
   const { user, company, updateUser, updateCompany } = useAuth()
@@ -40,6 +41,8 @@ export default function SettingsPage() {
   const [schedules, setSchedules] = useState<ScheduledReport[]>([])
   const [scheduleDialog, setScheduleDialog] = useState(false)
   const [newSchedule, setNewSchedule] = useState({ frequency: 'weekly', dayOfWeek: '1', recipients: '', dateRange: '1m' })
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
+  const [auditLoaded, setAuditLoaded] = useState(false)
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreference>({
     enabled: true,
     emailEnabled: true,
@@ -284,6 +287,18 @@ export default function SettingsPage() {
               <TabsTrigger value="billing" className="gap-2">
                 <CreditCard className="h-4 w-4" aria-hidden="true" />
                 Plano
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="audit" className="gap-2" onClick={async () => {
+                if (!auditLoaded && company?.id) {
+                  const res = await api.audit.listLog(company.id)
+                  if (res.success && res.data) setAuditLog(res.data)
+                  setAuditLoaded(true)
+                }
+              }}>
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Auditoria
               </TabsTrigger>
             )}
           </TabsList>
@@ -650,6 +665,49 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>}
+
+          {/* Aba Auditoria — admin only */}
+          {isAdmin && <TabsContent value="audit">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                    <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+                  </span>
+                  Log de auditoria
+                </CardTitle>
+                <CardDescription>Registro de ações relevantes realizadas por membros da equipe.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!auditLoaded ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">Clique na aba para carregar o log.</p>
+                ) : auditLog.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma ação registrada ainda.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {auditLog.map(entry => (
+                      <div key={entry.id} className="flex items-start justify-between rounded-xl border border-border bg-secondary/20 px-4 py-3 gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-xs font-mono">{entry.action}</Badge>
+                            {entry.resourceType && (
+                              <span className="text-xs text-muted-foreground">{entry.resourceType}{entry.resourceId ? ` #${entry.resourceId.slice(0, 8)}` : ''}</span>
+                            )}
+                          </div>
+                          {entry.userName && (
+                            <p className="text-xs text-muted-foreground mt-1">{entry.userName}</p>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                          {entry.createdAt ? new Date(entry.createdAt).toLocaleString('pt-BR') : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>}
 
           {/* Aba Plano — admin only */}

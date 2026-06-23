@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth/auth-context'
 import { api, opportunitiesApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { InsightsData, CarteiraOpportunity, RecoverySummary } from '@/types'
+import type { InsightsData, CarteiraOpportunity, RecoverySummary, ForecastData } from '@/types'
 
 import { DashboardHeader } from '@/components/dashboard/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -41,6 +41,7 @@ export default function DashboardPage() {
   const [wonCount, setWonCount] = useState(0)
   const [totalActions, setTotalActions] = useState(0)
   const [recovery, setRecovery] = useState<RecoverySummary | null>(null)
+  const [forecast, setForecast] = useState<ForecastData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean }>({
     open: false, text: '', loading: false,
@@ -51,10 +52,11 @@ export default function DashboardPage() {
       if (!company?.id) return
       setIsLoading(true)
       try {
-        const [insRes, cartRes, recRes] = await Promise.all([
+        const [insRes, cartRes, recRes, forecastRes] = await Promise.all([
           api.insights.get(company.id, { dateRange: '6m' }),
           api.carteira.list(company.id),
           api.outreach.getRecovery(),
+          api.insights.getForecast(company.id, '6m').catch(() => null),
         ])
         if (insRes.success && insRes.data) setInsights(insRes.data)
         if (cartRes.success && cartRes.data) {
@@ -68,6 +70,7 @@ export default function DashboardPage() {
           setTotalActions(all.length)
         }
         if (recRes.success && recRes.data) setRecovery(recRes.data)
+        if (forecastRes?.success && forecastRes.data) setForecast(forecastRes.data)
       } catch {
         toast.error('Não foi possível carregar o painel. Tente novamente.')
       } finally {
@@ -241,6 +244,43 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
+        {/* 5 · Previsão de receita */}
+        {(isLoading || forecast) && (
+          <Card className="rounded-2xl shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Previsão de receita</CardTitle>
+              <CardDescription>
+                {forecast ? (
+                  <>
+                    Projeção para os próximos 3 meses
+                    {forecast.trend === 'up' && <span className="ml-1.5 text-success font-medium">↑ tendência de crescimento</span>}
+                    {forecast.trend === 'down' && <span className="ml-1.5 text-destructive font-medium">↓ tendência de queda</span>}
+                    {forecast.trend === 'flat' && <span className="ml-1.5 text-muted-foreground font-medium">→ estável</span>}
+                  </>
+                ) : 'Projeção para os próximos 3 meses'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading || !forecast ? (
+                <Skeleton className="h-[80px] w-full rounded-xl bg-muted" />
+              ) : (
+                <div className="grid grid-cols-3 gap-4">
+                  {forecast.months.map((m, i) => (
+                    <div key={m.month} className={cn('rounded-xl border border-border p-4 space-y-1', i === 0 && 'border-primary/30 bg-accent/40')}>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{m.month}</p>
+                      <p className={cn('font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em] tabular-nums', forecast.trend === 'up' ? 'text-success' : forecast.trend === 'down' ? 'text-destructive' : 'text-foreground')}>
+                        {formatCurrency(m.projectedRevenue)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground tabular-nums">
+                        {formatCurrency(m.confidenceLow)} — {formatCurrency(m.confidenceHigh)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Modal de mensagem IA */}

@@ -35,6 +35,10 @@ import type {
   InboxEntry,
   WebhookConfig,
   WebhookDelivery,
+  MessageTemplate,
+  Campaign,
+  AuditEntry,
+  ForecastData,
 } from '@/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
@@ -259,6 +263,11 @@ export const insightsApi = {
   // Churn preditivo — clientes prestes a sumir (ação proativa)
   async getChurnRisk(companyId: string): Promise<ApiResponse<ChurnRiskData>> {
     return fetchWithAuth(`/insights/${companyId}/churn-risk`)
+  },
+
+  // Previsão de receita para os próximos 3 meses
+  async getForecast(companyId: string, dateRange: string = '6m'): Promise<ApiResponse<ForecastData>> {
+    return fetchWithAuth(`/insights/${companyId}/forecast?date_range=${encodeURIComponent(dateRange)}`)
   },
 
   // Baixa o relatório de insights em PDF (gerado no backend). Retorna o Blob
@@ -626,6 +635,78 @@ export const webhooksApi = {
   },
 }
 
+// --------------- Templates de Mensagem ---------------
+
+export const templatesApi = {
+  async list(): Promise<ApiResponse<MessageTemplate[]>> {
+    return fetchWithAuth('/outreach/templates')
+  },
+  async create(data: { name: string; segment: string; content: string; isActive?: boolean }): Promise<ApiResponse<MessageTemplate>> {
+    return fetchWithAuth('/outreach/templates', {
+      method: 'POST',
+      body: JSON.stringify({ name: data.name, segment: data.segment, content: data.content, is_active: data.isActive ?? true }),
+    })
+  },
+  async update(id: string, data: { name: string; segment: string; content: string; isActive?: boolean }): Promise<ApiResponse<MessageTemplate>> {
+    return fetchWithAuth(`/outreach/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: data.name, segment: data.segment, content: data.content, is_active: data.isActive ?? true }),
+    })
+  },
+  async remove(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/outreach/templates/${id}`, { method: 'DELETE' })
+  },
+}
+
+// --------------- Campanhas ---------------
+
+export const campaignsApi = {
+  async list(companyId: string, params?: { limit?: number; offset?: number }): Promise<ApiResponse<Campaign[]>> {
+    const p = new URLSearchParams()
+    if (params?.limit) p.set('limit', String(params.limit))
+    if (params?.offset) p.set('offset', String(params.offset))
+    const q = p.size ? `?${p.toString()}` : ''
+    return fetchWithAuth(`/campaigns/${companyId}${q}`)
+  },
+  async create(
+    companyId: string,
+    data: { name: string; segment?: string | null; branch?: string | null; salesperson?: string | null; messageContent: string }
+  ): Promise<ApiResponse<Campaign>> {
+    return fetchWithAuth(`/campaigns/${companyId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: data.name,
+        segment: data.segment ?? null,
+        branch: data.branch ?? null,
+        salesperson: data.salesperson ?? null,
+        message_content: data.messageContent,
+      }),
+    })
+  },
+  async send(companyId: string, campaignId: string): Promise<ApiResponse<{ queued: boolean; message: string }>> {
+    return fetchWithAuth(`/campaigns/${companyId}/${campaignId}/send`, { method: 'POST' })
+  },
+  async remove(companyId: string, campaignId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/campaigns/${companyId}/${campaignId}`, { method: 'DELETE' })
+  },
+}
+
+// --------------- Auditoria ---------------
+
+export const auditApi = {
+  async listLog(
+    companyId: string,
+    params?: { limit?: number; offset?: number; action?: string }
+  ): Promise<ApiResponse<AuditEntry[]>> {
+    const p = new URLSearchParams()
+    if (params?.limit) p.set('limit', String(params.limit))
+    if (params?.offset) p.set('offset', String(params.offset))
+    if (params?.action) p.set('action', params.action)
+    const q = p.size ? `?${p.toString()}` : ''
+    return fetchWithAuth(`/audit/${companyId}/log${q}`)
+  },
+}
+
 // --------------- Export agregado ---------------
 
 export const api = {
@@ -644,6 +725,9 @@ export const api = {
   outreach: outreachApi,
   reports: reportsApi,
   webhooks: webhooksApi,
+  templates: templatesApi,
+  campaigns: campaignsApi,
+  audit: auditApi,
 }
 
 

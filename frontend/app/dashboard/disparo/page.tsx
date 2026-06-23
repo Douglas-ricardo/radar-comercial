@@ -14,15 +14,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   MessageCircle, Mail, Send, Smartphone, CheckCircle2, AlertTriangle, Loader2, Pencil, TrendingUp,
-  ChevronDown, Settings2, Inbox,
+  ChevronDown, Settings2, Inbox, FileText, Plus, Trash2,
 } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
-import type { OutreachConfig, OutreachContact, RecoverySummary, ChurnRiskData, InboxEntry } from '@/types'
+import type { OutreachConfig, OutreachContact, RecoverySummary, ChurnRiskData, InboxEntry, MessageTemplate } from '@/types'
 import { useAuth } from '@/lib/auth/auth-context'
 import { formatCurrency } from '@/lib/format'
 
@@ -37,7 +39,13 @@ function DisparoPageContent() {
   const [churn, setChurn] = useState<ChurnRiskData | null>(null)
   const [inbox, setInbox] = useState<InboxEntry[]>([])
   const [inboxLoaded, setInboxLoaded] = useState(false)
-  const { company } = useAuth()
+  const [templates, setTemplates] = useState<MessageTemplate[]>([])
+  const [templatesLoaded, setTemplatesLoaded] = useState(false)
+  const [tplDialog, setTplDialog] = useState(false)
+  const [editTpl, setEditTpl] = useState<MessageTemplate | null>(null)
+  const [tplForm, setTplForm] = useState({ name: '', segment: 'at_risk', content: '', isActive: true })
+  const { company, user } = useAuth()
+  const isAnalyst = user?.role === 'admin' || user?.role === 'analyst'
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
@@ -164,6 +172,53 @@ function DisparoPageContent() {
     const res = await api.outreach.getInbox()
     if (res.success && res.data) setInbox(res.data)
     setInboxLoaded(true)
+  }
+
+  async function loadTemplates() {
+    if (templatesLoaded) return
+    const res = await api.templates.list()
+    if (res.success && res.data) setTemplates(res.data)
+    setTemplatesLoaded(true)
+  }
+
+  function openNewTpl() {
+    setEditTpl(null)
+    setTplForm({ name: '', segment: 'at_risk', content: '', isActive: true })
+    setTplDialog(true)
+  }
+
+  function openEditTpl(t: MessageTemplate) {
+    setEditTpl(t)
+    setTplForm({ name: t.name, segment: t.segment, content: t.content, isActive: t.isActive })
+    setTplDialog(true)
+  }
+
+  async function saveTpl() {
+    if (!tplForm.name.trim() || !tplForm.content.trim()) return
+    let res
+    if (editTpl) {
+      res = await api.templates.update(editTpl.id, tplForm)
+    } else {
+      res = await api.templates.create(tplForm)
+    }
+    if (res.success) {
+      toast.success(editTpl ? 'Template atualizado.' : 'Template criado.')
+      setTplDialog(false)
+      setTemplatesLoaded(false)
+      loadTemplates()
+    } else {
+      toast.error(res.error ?? 'Erro ao salvar template.')
+    }
+  }
+
+  async function deleteTpl(id: string) {
+    const res = await api.templates.remove(id)
+    if (res.success) {
+      toast.success('Template removido.')
+      setTemplates(prev => prev.filter(t => t.id !== id))
+    } else {
+      toast.error(res.error ?? 'Erro ao remover template.')
+    }
   }
 
   function openEdit(c: OutreachContact) {
@@ -409,8 +464,8 @@ function DisparoPageContent() {
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Tabs: Contatos + Respostas */}
-        <Tabs defaultValue="contacts" onValueChange={(v) => { if (v === 'inbox') loadInbox() }}>
+        {/* Tabs: Contatos + Respostas + Templates */}
+        <Tabs defaultValue="contacts" onValueChange={(v) => { if (v === 'inbox') loadInbox(); if (v === 'templates') loadTemplates() }}>
           <TabsList>
             <TabsTrigger value="contacts">
               <Smartphone className="h-4 w-4 mr-2" />
@@ -424,6 +479,10 @@ function DisparoPageContent() {
                   {recovery?.repliesCount}
                 </span>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="templates">
+              <FileText className="h-4 w-4 mr-2" />
+              Templates
             </TabsTrigger>
           </TabsList>
 
@@ -562,6 +621,50 @@ function DisparoPageContent() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="templates" className="mt-4">
+            <Card className="rounded-2xl border border-border bg-card shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Templates de mensagem</CardTitle>
+                  <CardDescription>Mensagens pré-configuradas por segmento — substituem a IA quando ativos.</CardDescription>
+                </div>
+                {isAnalyst && (
+                  <Button size="sm" onClick={openNewTpl}>
+                    <Plus className="h-4 w-4 mr-1" /> Novo template
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent>
+                {templates.length === 0 && templatesLoaded ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">
+                    Nenhum template criado. Use templates para padronizar mensagens por segmento.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {templates.map(t => (
+                      <div key={t.id} className="rounded-xl border border-border p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{t.name}</span>
+                            <Badge variant="outline" className="text-xs capitalize">{t.segment === 'at_risk' ? 'Em risco' : t.segment === 'lost' ? 'Perdidos' : 'Todos'}</Badge>
+                            {!t.isActive && <Badge variant="secondary" className="text-xs">Inativo</Badge>}
+                          </div>
+                          {isAnalyst && (
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => openEditTpl(t)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => deleteTpl(t.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">{t.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -652,6 +755,51 @@ function DisparoPageContent() {
             <Button variant="outline" onClick={() => setEditContact(null)}>Cancelar</Button>
             <Button onClick={saveContact}>Salvar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template dialog */}
+      <Dialog open={tplDialog} onOpenChange={setTplDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">
+              {editTpl ? 'Editar template' : 'Novo template'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <Label>Nome</Label>
+              <Input placeholder="Ex: Recuperação em risco" value={tplForm.name}
+                onChange={e => setTplForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Segmento</Label>
+              <Select value={tplForm.segment} onValueChange={v => setTplForm(f => ({ ...f, segment: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="at_risk">Em risco</SelectItem>
+                  <SelectItem value="lost">Perdidos</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Mensagem</Label>
+              <Textarea rows={5} placeholder="Use {customer_name} e {sender_name}."
+                value={tplForm.content}
+                onChange={e => setTplForm(f => ({ ...f, content: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Variáveis: {'{customer_name}'}, {'{sender_name}'}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="tpl-active" checked={tplForm.isActive}
+                onChange={e => setTplForm(f => ({ ...f, isActive: e.target.checked }))} />
+              <Label htmlFor="tpl-active">Template ativo</Label>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTplDialog(false)}>Cancelar</Button>
+              <Button onClick={saveTpl} disabled={!tplForm.name.trim() || !tplForm.content.trim()}>Salvar</Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

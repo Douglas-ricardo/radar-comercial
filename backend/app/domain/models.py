@@ -391,6 +391,57 @@ class ScheduledReport(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class MessageTemplate(Base):
+    """Template de mensagem de disparo por segmento — substitui a geração IA quando definido."""
+    __tablename__ = "message_templates"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    segment = Column(String, nullable=False)   # "at_risk" | "lost" | "all"
+    content = Column(String, nullable=False)   # texto com {customer_name}, {sender_name} etc.
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Campaign(Base):
+    """Campanha de disparo: mensagem personalizada enviada a um segmento específico de uma vez."""
+    __tablename__ = "campaigns"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    segment = Column(String, nullable=True)         # "at_risk" | "lost" | null (todos elegíveis)
+    branch = Column(String, nullable=True)
+    salesperson = Column(String, nullable=True)
+    message_content = Column(String, nullable=False)  # texto resolvido no momento de criar
+    status = Column(String, default="draft", index=True)  # draft | sending | sent | failed
+    target_count = Column(Integer, default=0)
+    sent_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+    sent_at = Column(DateTime, nullable=True)
+
+
+class AuditLog(Base):
+    """Registro de auditoria de ações importantes por usuário (governança/compliance)."""
+    __tablename__ = "audit_logs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    user_id = Column(String, nullable=True)
+    user_name = Column(String, nullable=True)
+    action = Column(String, nullable=False)          # ex: "opportunity.won", "user.invited"
+    resource_type = Column(String, nullable=True)    # "opportunity" | "user" | "campaign"
+    resource_id = Column(String, nullable=True)
+    details = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_audit_logs_company_created", "company_id", "created_at"),
+    )
+
+
 class WebhookConfig(Base):
     """Webhook de saída por empresa: push de eventos de oportunidade para CRMs externos."""
     __tablename__ = "webhook_configs"

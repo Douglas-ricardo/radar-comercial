@@ -26,7 +26,7 @@ celery_app = Celery(
     "radar_comercial_worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks", "app.workers.webhook_tasks"],
+    include=["app.workers.tasks", "app.workers.notification_tasks", "app.workers.sync_tasks", "app.workers.outreach_tasks", "app.workers.webhook_tasks", "app.workers.campaign_tasks"],
 )
 
 celery_app.conf.update(
