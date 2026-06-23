@@ -27,6 +27,8 @@ export interface User {
     uploadsUsed: number
     /** Ciclo de compra médio em dias (afeta scores de churn). Default: 90. */
     purchaseCycleDays?: number
+    /** CIDRs permitidos para login (enterprise). Vazio = sem restrição. */
+    ipAllowlist?: string[]
     ownerId: string
     createdAt: string
     updatedAt: string
@@ -480,6 +482,27 @@ export interface User {
     resourceId: string | null
     details: Record<string, unknown>
     createdAt: string
+  }
+
+  // --------------- Segurança: MFA & Sessões ---------------
+
+  export interface MfaStatus {
+    enabled: boolean
+    backupCodesRemaining: number
+  }
+
+  export interface MfaSetup {
+    qrcode: string
+    secret: string
+  }
+
+  export interface UserSessionEntry {
+    id: string
+    ip: string | null
+    userAgent: string | null
+    createdAt: string | null
+    lastSeenAt: string | null
+    current: boolean
   }
 
   // --------------- Previsão de Receita ---------------

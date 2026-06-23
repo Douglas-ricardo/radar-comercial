@@ -19,7 +19,8 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
-import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar, ShieldCheck } from 'lucide-react'
+import { Building2, User, CreditCard, Lock, Bell, Send, FileText, Plus, Trash2, Calendar, ShieldCheck, KeyRound } from 'lucide-react'
+import { SecurityTab } from '@/components/settings/security-tab'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -271,6 +272,10 @@ export default function SettingsPage() {
               <User className="h-4 w-4" aria-hidden="true" />
               Perfil
             </TabsTrigger>
+            <TabsTrigger value="security" className="gap-2">
+              <KeyRound className="h-4 w-4" aria-hidden="true" />
+              Segurança
+            </TabsTrigger>
             {isAdmin && (
               <TabsTrigger value="company" className="gap-2">
                 <Building2 className="h-4 w-4" aria-hidden="true" />
@@ -431,6 +436,11 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
+          </TabsContent>
+
+          {/* Aba Segurança — todos os usuários */}
+          <TabsContent value="security">
+            <SecurityTab />
           </TabsContent>
 
           {/* Aba Empresa — admin only */}

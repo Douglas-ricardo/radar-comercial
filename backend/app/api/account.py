@@ -5,9 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import ipaddress
+
 from app.core.auth import get_current_user_and_company
 from app.domain.models import Company, User
 from app.infrastructure.database import get_db_session
+from app.services.plan_service import PlanService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ class UpdateCompanyRequest(BaseModel):
     name: str | None = None
     cnpj: str | None = None
     purchase_cycle_days: int | None = None
+    ip_allowlist: list[str] | None = None
 
 
 @users_router.patch("/{user_id}")
@@ -95,6 +99,21 @@ def update_company(
             raise HTTPException(status_code=400, detail="Ciclo de compra deve ser entre 1 e 365 dias.")
         company.purchase_cycle_days = data.purchase_cycle_days
 
+    if data.ip_allowlist is not None:
+        # IP allowlist é recurso enterprise. Valida cada CIDR/IP antes de salvar.
+        PlanService.require_feature(company, "ip_allowlist")
+        cleaned: list[str] = []
+        for entry in data.ip_allowlist:
+            entry = (entry or "").strip()
+            if not entry:
+                continue
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Entrada de IP/CIDR inválida: '{entry}'.")
+            cleaned.append(entry)
+        company.ip_allowlist = cleaned
+
     db.commit()
     db.refresh(company)
 
@@ -110,6 +129,7 @@ def update_company(
             "uploadsLimit": company.uploads_limit,
             "uploadsUsed": company.uploads_used,
             "purchaseCycleDays": company.purchase_cycle_days,
+            "ipAllowlist": company.ip_allowlist or [],
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,

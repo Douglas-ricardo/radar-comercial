@@ -22,7 +22,8 @@ import type { User, Company, AuthState, LoginCredentials, SignupData } from '@/t
 import { api, UnauthorizedError } from '@/lib/api/client'
 
 interface AuthContextType extends AuthState {
-  login: (credentials: LoginCredentials) => Promise<void>
+  login: (credentials: LoginCredentials) => Promise<{ mfaRequired: true; mfaToken: string } | void>
+  verifyMfa: (mfaToken: string, code: string) => Promise<void>
   signup: (data: SignupData) => Promise<void>
   logout: () => Promise<void>
   handleUnauthorized: () => void
@@ -116,6 +117,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await api.auth.login(credentials)
       if (response.success && response.data) {
+        // MFA: o backend não autenticou ainda — sinaliza 2º passo para a UI.
+        if ('mfaRequired' in response.data) {
+          dispatch({ type: 'SET_LOADING', payload: false })
+          return { mfaRequired: true as const, mfaToken: response.data.mfaToken }
+        }
         dispatch({
           type: 'SET_USER',
           payload: { user: response.data.user, company: response.data.company },
@@ -128,6 +134,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         dispatch({ type: 'SET_LOADING', payload: false })
         throw new Error(response.error ?? 'Credenciais inválidas')
+      }
+    } catch (error) {
+      dispatch({ type: 'SET_LOADING', payload: false })
+      throw error
+    }
+  }, [router])
+
+  const verifyMfa = useCallback(async (mfaToken: string, code: string) => {
+    dispatch({ type: 'SET_LOADING', payload: true })
+    try {
+      const response = await api.auth.verifyMfa(mfaToken, code)
+      if (response.success && response.data) {
+        dispatch({
+          type: 'SET_USER',
+          payload: { user: response.data.user, company: response.data.company },
+        })
+        if (response.data.requiresPasswordChange) {
+          router.push('/set-password')
+        }
+      } else {
+        dispatch({ type: 'SET_LOADING', payload: false })
+        throw new Error(response.error ?? 'Código inválido')
       }
     } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false })
@@ -178,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         ...state,
         login,
+        verifyMfa,
         signup,
         logout,
         handleUnauthorized,

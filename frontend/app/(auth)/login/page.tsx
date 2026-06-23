@@ -19,7 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar, ShieldCheck } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -29,7 +29,11 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  const { login } = useAuth()
+  // 2º passo (MFA)
+  const [mfaToken, setMfaToken] = useState<string | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+
+  const { login, verifyMfa } = useAuth()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,10 +42,29 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      await login({ email, password })
+      const result = await login({ email, password })
+      if (result && 'mfaRequired' in result) {
+        setMfaToken(result.mfaToken)
+        return
+      }
       router.push('/dashboard')
     } catch {
       setError('Email ou senha incorretos. Verifique e tente novamente.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!mfaToken) return
+    setError('')
+    setIsLoading(true)
+    try {
+      await verifyMfa(mfaToken, mfaCode)
+      router.push('/dashboard')
+    } catch {
+      setError('Código inválido. Tente novamente ou use um código de backup.')
     } finally {
       setIsLoading(false)
     }
@@ -64,6 +87,51 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
 
+        {mfaToken ? (
+          <CardContent className="pb-8">
+            <form onSubmit={handleMfaSubmit} className="space-y-5" noValidate>
+              <div aria-live="polite" aria-atomic="true">
+                {error && (
+                  <Alert variant="destructive" role="alert" className="border-destructive/30 bg-destructive/10 text-destructive">
+                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                    <AlertDescription className="ml-1 text-sm font-medium">{error}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+              <div className="flex flex-col items-center text-center gap-2 pb-1">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                  <ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Digite o código de 6 dígitos do seu app autenticador (ou um código de backup).
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mfa-code" className="text-sm font-medium">Código de verificação</Label>
+                <Input
+                  id="mfa-code"
+                  inputMode="numeric"
+                  autoFocus
+                  placeholder="000000"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  disabled={isLoading}
+                  className="h-11 text-center text-lg tracking-[0.3em] tabular-nums"
+                />
+              </div>
+              <Button type="submit" className="h-11 w-full text-base font-semibold" disabled={isLoading || mfaCode.length < 6} aria-busy={isLoading}>
+                {isLoading ? (<><Spinner className="mr-2 h-4 w-4" />Verificando…</>) : (<>Verificar e entrar<ArrowRight className="ml-2 h-4 w-4" /></>)}
+              </Button>
+              <button
+                type="button"
+                onClick={() => { setMfaToken(null); setMfaCode(''); setError('') }}
+                className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Voltar ao login
+              </button>
+            </form>
+          </CardContent>
+        ) : (
         <CardContent className="pb-6">
           <form onSubmit={handleSubmit} className="space-y-5" noValidate>
             {/* Região live para leitores de tela */}
@@ -192,7 +260,9 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
+        )}
 
+        {!mfaToken && (
         <CardFooter className="flex flex-col space-y-4 pb-8">
           <div className="relative w-full">
             <div className="absolute inset-0 flex items-center">
@@ -212,6 +282,7 @@ export default function LoginPage() {
             </Link>
           </p>
         </CardFooter>
+        )}
       </Card>
     </div>
   )

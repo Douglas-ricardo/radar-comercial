@@ -1,5 +1,6 @@
 # app/api/auth.py
 import hashlib
+import ipaddress
 import logging
 import os
 import secrets
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.database import get_db_session
 from app.infrastructure.redis_client import redis_client
-from app.domain.models import User, Company
+from app.domain.models import User, Company, UserSession
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -19,9 +20,12 @@ from app.core.security import (
     validate_password_strength,
 )
 from app.core.auth import get_current_user_and_company
+from app.core.clock import utcnow
 from app.core.rate_limit import limiter
+from app.core.sessions import create_session, revoke_session
 from app.services.plan_service import PlanService
 from app.services.notification_service import NotificationService
+from app.services import audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,65 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 # Cookie em produção precisa de Secure=True (HTTPS); em dev (HTTP) fica False.
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+_MFA_PENDING_TTL = 60 * 5  # 5 min para concluir o 2º passo do login
+_MFA_PENDING_PREFIX = "mfa_pending:"
+
+
+def _client_ip(request: Request) -> str | None:
+    """IP real do cliente, respeitando X-Forwarded-For (primeiro hop)."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def _ip_allowed(company: Company, ip: str | None) -> bool:
+    """True se o IP está dentro do allowlist da empresa (ou se não há allowlist)."""
+    allowlist = getattr(company, "ip_allowlist", None) or []
+    if not allowlist:
+        return True
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for cidr in allowlist:
+        try:
+            if addr in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key="radar_session",
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,  # 7 dias
+    )
+
+
+def _issue_login(request: Request, response: Response, db: Session, user: User, company: Company) -> str:
+    """Cria sessão durável, embute sid no JWT, seta o cookie e retorna o token."""
+    sid = create_session(
+        db, user_id=user.id, company_id=company.id,
+        ip=_client_ip(request), user_agent=request.headers.get("user-agent"),
+    )
+    token = create_access_token(data={
+        "sub": user.id,
+        "company_id": company.id,
+        "role": user.role,
+        "scope": user.scope,
+        "cv": user.credential_version or 0,
+        "sid": sid,
+    })
+    _set_session_cookie(response, token)
+    return token
 
 
 class LoginRequest(BaseModel):
@@ -137,23 +200,7 @@ def signup(request: Request, data: SignupRequest, response: Response, db: Sessio
 
     logger.info("auth.signup", extra={"company_id": new_company.id, "user_id": new_user.id})
 
-    token_data = {
-        "sub": new_user.id,
-        "company_id": new_company.id,
-        "role": new_user.role,
-        "scope": new_user.scope,
-        "cv": new_user.credential_version or 0,
-    }
-    access_token = create_access_token(data=token_data)
-
-    response.set_cookie(
-        key="radar_session",
-        value=access_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 7, # 7 dias
-    )
+    access_token = _issue_login(request, response, db, new_user, new_company)
 
     return {"success": True, "data": _build_auth_response(access_token, new_user, new_company)}
 
@@ -177,26 +224,79 @@ def login(request: Request, data: LoginRequest, response: Response, db: Session 
             detail="Empresa associada ao usuário não encontrada. Contacte o suporte.",
         )
 
+    # IP allowlist (enterprise): bloqueia login fora dos CIDRs configurados.
+    ip = _client_ip(request)
+    if not _ip_allowed(company, ip):
+        audit_service.log_action(db, company_id=company.id, action="login.blocked_ip",
+                                  user_id=user.id, user_name=user.name, details={"ip": ip})
+        db.commit()
+        logger.warning("auth.login.blocked_ip", extra={"user_id": user.id, "ip": ip})
+        raise HTTPException(status_code=403, detail="Acesso bloqueado para o seu endereço de rede.")
+
+    # MFA (2 passos): se ativo, não emite o cookie ainda — devolve um token pendente
+    # de curta duração e exige o código TOTP em /auth/mfa/verify.
+    if user.mfa_enabled:
+        pending = secrets.token_urlsafe(32)
+        try:
+            redis_client.setex(f"{_MFA_PENDING_PREFIX}{hashlib.sha256(pending.encode()).hexdigest()}",
+                               _MFA_PENDING_TTL, user.id)
+        except Exception as exc:
+            logger.error("auth.login.mfa_redis_error", extra={"error": str(exc)})
+            raise HTTPException(status_code=500, detail="Erro ao iniciar verificação. Tente novamente.")
+        logger.info("auth.login.mfa_required", extra={"user_id": user.id})
+        return {"success": True, "data": {"mfaRequired": True, "mfaToken": pending}}
+
     logger.info("auth.login", extra={"user_id": user.id, "company_id": company.id})
 
-    token_data = {
-        "sub": user.id,
-        "company_id": company.id,
-        "role": user.role,
-        "scope": user.scope,
-        "cv": user.credential_version or 0,
-    }
-    access_token = create_access_token(data=token_data)
+    access_token = _issue_login(request, response, db, user, company)
+    audit_service.log_action(db, company_id=company.id, action="auth.login",
+                             user_id=user.id, user_name=user.name, details={"ip": ip})
+    db.commit()
 
-    # Adiciona o Cookie na resposta
-    response.set_cookie(
-        key="radar_session",
-        value=access_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 7,
-    )
+    auth_data = _build_auth_response(access_token, user, company)
+    auth_data["requiresPasswordChange"] = (user.status == "pending")
+    return {"success": True, "data": auth_data}
+
+
+class MfaVerifyRequest(BaseModel):
+    mfa_token: str
+    code: str
+
+
+@router.post("/mfa/verify")
+@limiter.limit("10/minute")
+def mfa_verify(request: Request, data: MfaVerifyRequest, response: Response, db: Session = Depends(get_db_session)):
+    """2º passo do login com MFA: valida o código TOTP (ou backup code) e emite o cookie."""
+    token_hash = hashlib.sha256(data.mfa_token.encode()).hexdigest()
+    redis_key = f"{_MFA_PENDING_PREFIX}{token_hash}"
+    try:
+        user_id = redis_client.get(redis_key)
+        if isinstance(user_id, bytes):
+            user_id = user_id.decode()
+    except Exception:
+        user_id = None
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Sessão de verificação expirada. Faça login novamente.")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.mfa_enabled:
+        raise HTTPException(status_code=400, detail="Verificação inválida.")
+
+    from app.services.mfa_service import verify_user_code
+    if not verify_user_code(db, user, data.code):
+        logger.warning("auth.mfa_verify.invalid", extra={"user_id": user.id})
+        raise HTTPException(status_code=400, detail="Código inválido.")
+
+    try:
+        redis_client.delete(redis_key)
+    except Exception:
+        pass
+
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    access_token = _issue_login(request, response, db, user, company)
+    audit_service.log_action(db, company_id=company.id, action="auth.login",
+                             user_id=user.id, user_name=user.name, details={"mfa": True})
+    db.commit()
 
     auth_data = _build_auth_response(access_token, user, company)
     auth_data["requiresPasswordChange"] = (user.status == "pending")
@@ -221,9 +321,90 @@ def get_me(
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db_session),
+):
+    # Revoga a sessão durável (se houver sid no token) antes de limpar o cookie.
+    token = request.cookies.get("radar_session")
+    if token:
+        try:
+            import jwt as _jwt
+            from app.core.auth import SECRET_KEY, ALGORITHM
+            payload = _jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+            sid = payload.get("sid")
+            if sid:
+                revoke_session(db, sid)
+        except Exception:
+            pass
     response.delete_cookie("radar_session")
     return {"success": True}
+
+
+@router.get("/sessions")
+def list_sessions(
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Sessões ativas do usuário atual (para a aba Segurança)."""
+    sessions = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == token_data.user_id, UserSession.revoked_at.is_(None))
+        .order_by(UserSession.last_seen_at.desc())
+        .all()
+    )
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": s.id,
+                "ip": s.ip,
+                "userAgent": s.user_agent,
+                "createdAt": s.created_at.isoformat() if s.created_at else None,
+                "lastSeenAt": s.last_seen_at.isoformat() if s.last_seen_at else None,
+                "current": s.id == token_data.sid,
+            }
+            for s in sessions
+        ],
+    }
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_one_session(
+    session_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    sess = db.query(UserSession).filter(
+        UserSession.id == session_id, UserSession.user_id == token_data.user_id
+    ).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada.")
+    revoke_session(db, session_id)
+    audit_service.log_action(db, company_id=token_data.company_id, action="session.revoked",
+                             user_id=token_data.user_id, details={"session_id": session_id})
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/sessions")
+def revoke_other_sessions(
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Encerra todas as outras sessões, exceto a atual."""
+    others = db.query(UserSession).filter(
+        UserSession.user_id == token_data.user_id,
+        UserSession.revoked_at.is_(None),
+        UserSession.id != token_data.sid,
+    ).all()
+    for s in others:
+        revoke_session(db, s.id)
+    audit_service.log_action(db, company_id=token_data.company_id, action="session.revoked_all",
+                             user_id=token_data.user_id, details={"count": len(others)})
+    db.commit()
+    return {"success": True, "data": {"revoked": len(others)}}
 
 
 @router.post("/change-password")
@@ -258,22 +439,9 @@ def change_password(
     user.credential_version = (user.credential_version or 0) + 1
     db.commit()
 
-    # Reemite o cookie da sessão atual com o novo cv para o usuário não cair.
-    new_token = create_access_token(data={
-        "sub": user.id,
-        "company_id": user.company_id,
-        "role": user.role,
-        "scope": user.scope,
-        "cv": user.credential_version,
-    })
-    response.set_cookie(
-        key="radar_session",
-        value=new_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 7,
-    )
+    # Reemite o cookie (nova sessão) para o usuário não cair após o bump de cv.
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    _issue_login(request, response, db, user, company)
 
     logger.info("auth.change_password.success", extra={"user_id": user.id})
     return {"success": True}
@@ -402,21 +570,8 @@ def set_password(
     user.credential_version = (user.credential_version or 0) + 1
     db.commit()
 
-    new_token = create_access_token(data={
-        "sub": user.id,
-        "company_id": user.company_id,
-        "role": user.role,
-        "scope": user.scope,
-        "cv": user.credential_version,
-    })
-    response.set_cookie(
-        key="radar_session",
-        value=new_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 7,
-    )
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    _issue_login(request, response, db, user, company)
 
     logger.info("auth.set_password.success", extra={"user_id": user.id})
     return {"success": True}

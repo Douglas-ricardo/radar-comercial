@@ -39,7 +39,15 @@ import type {
   Campaign,
   AuditEntry,
   ForecastData,
+  MfaStatus,
+  MfaSetup,
+  UserSessionEntry,
 } from '@/types'
+
+/** Resposta de login: ou autentica direto, ou exige 2º fator (MFA). */
+export type LoginResult =
+  | { user: User; company: Company; requiresPasswordChange?: boolean }
+  | { mfaRequired: true; mfaToken: string }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
@@ -111,12 +119,35 @@ async function fetchWithAuth<T>(
 export const authApi = {
   async login(
     credentials: LoginCredentials
-  ): Promise<ApiResponse<{ user: User; company: Company }>> {
-    // O backend seta o cookie httpOnly na resposta — sem token no body
+  ): Promise<ApiResponse<LoginResult>> {
+    // O backend seta o cookie httpOnly na resposta — sem token no body.
+    // Se a conta tiver MFA, retorna { mfaRequired, mfaToken } sem setar cookie.
     return fetchWithAuth('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
     })
+  },
+
+  async verifyMfa(
+    mfaToken: string,
+    code: string
+  ): Promise<ApiResponse<{ user: User; company: Company; requiresPasswordChange?: boolean }>> {
+    return fetchWithAuth('/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ mfa_token: mfaToken, code }),
+    })
+  },
+
+  async listSessions(): Promise<ApiResponse<UserSessionEntry[]>> {
+    return fetchWithAuth('/auth/sessions')
+  },
+
+  async revokeSession(sessionId: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/auth/sessions/${sessionId}`, { method: 'DELETE' })
+  },
+
+  async revokeOtherSessions(): Promise<ApiResponse<{ revoked: number }>> {
+    return fetchWithAuth('/auth/sessions', { method: 'DELETE' })
   },
 
   async signup(
@@ -691,6 +722,26 @@ export const campaignsApi = {
   },
 }
 
+// --------------- MFA (2FA) ---------------
+
+export const mfaApi = {
+  async status(): Promise<ApiResponse<MfaStatus>> {
+    return fetchWithAuth('/mfa/status')
+  },
+  async setup(): Promise<ApiResponse<MfaSetup>> {
+    return fetchWithAuth('/mfa/setup', { method: 'POST' })
+  },
+  async enable(code: string): Promise<ApiResponse<{ backupCodes: string[] }>> {
+    return fetchWithAuth('/mfa/enable', { method: 'POST', body: JSON.stringify({ code }) })
+  },
+  async disable(password: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth('/mfa/disable', { method: 'POST', body: JSON.stringify({ password }) })
+  },
+  async regenerateBackupCodes(): Promise<ApiResponse<{ backupCodes: string[] }>> {
+    return fetchWithAuth('/mfa/backup-codes/regenerate', { method: 'POST' })
+  },
+}
+
 // --------------- Auditoria ---------------
 
 export const auditApi = {
@@ -728,6 +779,7 @@ export const api = {
   templates: templatesApi,
   campaigns: campaignsApi,
   audit: auditApi,
+  mfa: mfaApi,
 }
 
 

@@ -26,6 +26,8 @@ class Company(Base):
     # ramos com ciclos longos (construção, agro) não devem ter clientes marcados como
     # at_risk com 60 dias de recência — o padrão 90 cobre a maioria das PMEs.
     purchase_cycle_days = Column(Integer, default=90, nullable=False)
+    # Lista de CIDRs permitidos para login (enterprise). Vazio = sem restrição de IP.
+    ip_allowlist = Column(JSON, default=list)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -45,6 +47,10 @@ class User(Base):
     # Escopo territorial opcional: "branch:SP-001" filtra visibilidade de carteira/clientes.
     # None = sem restrição (admin vê tudo); preenchido pelo admin no convite.
     scope = Column(String, nullable=True)
+    # MFA (TOTP). mfa_secret é cifrado com Fernet (app/core/crypto.py).
+    mfa_enabled = Column(Boolean, default=False, nullable=False)
+    mfa_secret = Column(String, nullable=True)
+    mfa_backup_codes = Column(JSON, default=list)  # lista de SHA-256 de códigos de backup
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -469,3 +475,23 @@ class WebhookDelivery(Base):
     response_code = Column(Integer, nullable=True)
     attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+
+class UserSession(Base):
+    """Sessão durável de usuário — habilita 'sessões ativas' e revogação seletiva.
+    O JWT por cookie carrega o session_id (sid); cada request valida que a sessão
+    não foi revogada (cache Redis + fallback no banco)."""
+    __tablename__ = "user_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    ip = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    last_seen_at = Column(DateTime, default=utcnow)
+    revoked_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_user_sessions_user_revoked", "user_id", "revoked_at"),
+    )

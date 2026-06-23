@@ -32,6 +32,7 @@ class TokenData(BaseModel):
     company_id: str
     role: str
     scope: str | None = None  # "branch:SP-001" → filtra carteira/clientes; None = sem restrição
+    sid: str | None = None    # session id (sessão durável revogável); None = token legado
 
 async def get_current_user_and_company(
     request: Request,
@@ -57,6 +58,7 @@ async def get_current_user_and_company(
         role: str = payload.get("role", "viewer")
         scope: str | None = payload.get("scope")
         token_cv: int = payload.get("cv", 0)
+        sid: str | None = payload.get("sid")
 
         # 🔴 CORREÇÃO: Validar se os dados vitais estão lá
         if user_id is None or company_id is None:
@@ -70,7 +72,15 @@ async def get_current_user_and_company(
             logger.info("auth.token.revoked", extra={"user_id": user_id})
             raise credentials_exception
 
-        return TokenData(user_id=user_id, company_id=company_id, role=role, scope=scope)
+        # Revogação por sessão: se o token carrega sid e a sessão foi revogada, recusa.
+        # Tokens legados (sem sid) seguem válidos até expirar — sem regressão.
+        if sid:
+            from app.core.sessions import is_session_revoked
+            if is_session_revoked(db, sid):
+                logger.info("auth.session.revoked", extra={"user_id": user_id, "sid": sid})
+                raise credentials_exception
+
+        return TokenData(user_id=user_id, company_id=company_id, role=role, scope=scope, sid=sid)
 
     except jwt.ExpiredSignatureError:
         logger.info("auth.token.expired")
