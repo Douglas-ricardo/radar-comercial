@@ -31,6 +31,8 @@ export interface User {
     ipAllowlist?: string[]
     /** Retenção de logs de auditoria em dias (default 365). */
     auditRetentionDays?: number
+    /** Moeda de exibição ISO 4217 (default BRL). */
+    currency?: string
     ownerId: string
     createdAt: string
     updatedAt: string
@@ -244,6 +246,43 @@ export interface User {
     type: 'region' | 'branch' | 'team'
     parentId: string | null
     createdAt: string | null
+  }
+
+  // --------------- CRM (sync bidirecional) ---------------
+
+  export interface CrmConnection {
+    id: string
+    provider: 'hubspot' | 'salesforce' | 'pipedrive'
+    enabled: boolean
+    pushEnabled: boolean
+    fieldMap: Record<string, string>
+    lastSyncAt: string | null
+    lastSyncStatus: 'ok' | 'error' | null
+    lastSyncError: string | null
+    createdAt: string | null
+  }
+
+  // --------------- Saved views ---------------
+
+  export interface SavedView {
+    id: string
+    name: string
+    page: 'carteira' | 'insights' | 'dashboard'
+    config: Record<string, unknown>
+    createdAt: string | null
+  }
+
+  // --------------- Cohorts ---------------
+
+  export interface CohortRow {
+    cohort: string
+    size: number
+    retention: number[]
+  }
+
+  export interface CohortData {
+    cohorts: CohortRow[]
+    maxOffset: number
   }
   
   // --------------- API ---------------

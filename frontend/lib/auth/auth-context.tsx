@@ -20,6 +20,7 @@ import {
 import { useRouter } from 'next/navigation'
 import type { User, Company, AuthState, LoginCredentials, SignupData } from '@/types'
 import { api, UnauthorizedError } from '@/lib/api/client'
+import { setActiveCurrency } from '@/lib/utils'
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<{ mfaRequired: true; mfaToken: string } | void>
@@ -50,6 +51,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload }
     case 'SET_USER':
+      setActiveCurrency(action.payload.company?.currency)
       return {
         ...state,
         user: action.payload.user,
@@ -63,6 +65,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         user: state.user ? { ...state.user, ...action.payload } : null,
       }
     case 'UPDATE_COMPANY':
+      if (action.payload.currency) setActiveCurrency(action.payload.currency)
       return {
         ...state,
         company: state.company ? { ...state.company, ...action.payload } : null,

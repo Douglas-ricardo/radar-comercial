@@ -32,6 +32,8 @@ class Company(Base):
     sso_slug = Column(String, nullable=True, unique=True, index=True)
     # Retenção de logs de auditoria (dias). Task diária purga registros mais antigos.
     audit_retention_days = Column(Integer, default=365, nullable=False)
+    # Moeda de exibição (ISO 4217). Afeta formatação no frontend (multi-país).
+    currency = Column(String, default="BRL", nullable=False)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -484,6 +486,38 @@ class WebhookDelivery(Base):
     status = Column(String, default="pending")   # pending | delivered | failed
     response_code = Column(Integer, nullable=True)
     attempts = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class CrmConnection(Base):
+    """Conexão bidirecional com CRM externo (HubSpot/Salesforce/Pipedrive).
+    credentials cifrado (Fernet): token de API ou tokens OAuth."""
+    __tablename__ = "crm_connections"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    provider = Column(String, nullable=False)        # "hubspot" | "salesforce" | "pipedrive"
+    credentials = Column(String, nullable=False)      # JSON cifrado (token/oauth)
+    enabled = Column(Boolean, default=True, nullable=False)
+    push_enabled = Column(Boolean, default=True, nullable=False)  # push won/lost ao CRM
+    field_map = Column(JSON, default=dict)            # mapeamento de campos custom
+    last_sync_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String, nullable=True)  # ok | error
+    last_sync_error = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class SavedView(Base):
+    """Visão salva (filtros + layout) por usuário para dashboards/carteira."""
+    __tablename__ = "saved_views"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    page = Column(String, nullable=False)   # "carteira" | "insights" | "dashboard"
+    config = Column(JSON, default=dict)      # filtros/opções serializados
     created_at = Column(DateTime, default=utcnow)
 
 

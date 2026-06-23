@@ -233,3 +233,71 @@ def get_forecast(
             "avgMonthlyGrowth": round(avg_delta, 2),
         },
     }
+
+
+def _month_key(m: str):
+    """Chave ordenável a partir de rótulos de mês variados (YYYY-MM, 'Jan 2026'...)."""
+    for fmt in ("%Y-%m", "%b %Y", "%B %Y", "%m/%Y", "%Y/%m"):
+        try:
+            return datetime.strptime(m, fmt)
+        except (ValueError, TypeError):
+            continue
+    return m  # fallback: ordena lexicograficamente
+
+
+@router.get("/{company_id}/cohorts")
+def get_cohorts(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Retenção por safra de aquisição: agrupa clientes pelo 1º mês ativo e mede,
+    em cada mês seguinte, quantos seguiram comprando. Derivado de monthly_revenue."""
+    if str(token_data.company_id) != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    profiles = db.query(CustomerProfile.monthly_revenue).filter(
+        CustomerProfile.company_id == company_id
+    ).all()
+
+    # Conjunto global de meses, ordenado → índice por mês.
+    all_months: set[str] = set()
+    parsed: list[list[str]] = []  # meses ativos (value>0) por cliente
+    for (mr,) in profiles:
+        if not mr:
+            continue
+        active = [p.get("month") for p in mr if (p.get("value") or 0) > 0 and p.get("month")]
+        if active:
+            parsed.append(active)
+            all_months.update(active)
+
+    if not all_months:
+        return {"success": True, "data": {"cohorts": [], "maxOffset": 0}}
+
+    ordered = sorted(all_months, key=_month_key)
+    index = {m: i for i, m in enumerate(ordered)}
+    max_offset = min(len(ordered) - 1, 11)  # até 12 colunas
+
+    # Agrupa por mês de aquisição (menor índice ativo).
+    cohorts: dict[str, list[set[int]]] = {}
+    for active in parsed:
+        idxs = sorted(index[m] for m in active)
+        cohort_idx = idxs[0]
+        cohort_month = ordered[cohort_idx]
+        cohorts.setdefault(cohort_month, []).append(set(idxs))
+
+    result = []
+    for cohort_month in sorted(cohorts.keys(), key=_month_key):
+        members = cohorts[cohort_month]
+        size = len(members)
+        cohort_idx = index[cohort_month]
+        retention = []
+        for offset in range(max_offset + 1):
+            target = cohort_idx + offset
+            if target >= len(ordered):
+                break
+            active_count = sum(1 for s in members if target in s)
+            retention.append(round(100.0 * active_count / size, 1) if size else 0.0)
+        result.append({"cohort": cohort_month, "size": size, "retention": retention})
+
+    return {"success": True, "data": {"cohorts": result, "maxOffset": max_offset}}

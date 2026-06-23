@@ -49,6 +49,9 @@ import type {
   RolesData,
   CustomRole,
   OrgUnit,
+  CrmConnection,
+  SavedView,
+  CohortData,
 } from '@/types'
 
 /** Resposta de login: ou autentica direto, ou exige 2º fator (MFA). */
@@ -306,6 +309,11 @@ export const insightsApi = {
   // Previsão de receita para os próximos 3 meses
   async getForecast(companyId: string, dateRange: string = '6m'): Promise<ApiResponse<ForecastData>> {
     return fetchWithAuth(`/insights/${companyId}/forecast?date_range=${encodeURIComponent(dateRange)}`)
+  },
+
+  // Análise de cohorts (retenção por safra de aquisição)
+  async getCohorts(companyId: string): Promise<ApiResponse<CohortData>> {
+    return fetchWithAuth(`/insights/${companyId}/cohorts`)
   },
 
   // Baixa o relatório de insights em PDF (gerado no backend). Retorna o Blob
@@ -782,6 +790,41 @@ export const orgUnitsApi = {
   },
 }
 
+// --------------- CRM (sync bidirecional) ---------------
+
+export const crmApi = {
+  async list(): Promise<ApiResponse<CrmConnection[]>> {
+    return fetchWithAuth('/integrations/crm')
+  },
+  async create(data: { provider: string; credentials: Record<string, string>; pushEnabled?: boolean; fieldMap?: Record<string, string> }): Promise<ApiResponse<CrmConnection>> {
+    return fetchWithAuth('/integrations/crm', {
+      method: 'POST',
+      body: JSON.stringify({ provider: data.provider, credentials: data.credentials, push_enabled: data.pushEnabled ?? true, field_map: data.fieldMap ?? {} }),
+    })
+  },
+  async sync(id: string): Promise<ApiResponse<{ queued: boolean; message: string }>> {
+    return fetchWithAuth(`/integrations/crm/${id}/sync`, { method: 'POST' })
+  },
+  async remove(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/integrations/crm/${id}`, { method: 'DELETE' })
+  },
+}
+
+// --------------- Saved views ---------------
+
+export const savedViewsApi = {
+  async list(page?: string): Promise<ApiResponse<SavedView[]>> {
+    const q = page ? `?page=${encodeURIComponent(page)}` : ''
+    return fetchWithAuth(`/saved-views${q}`)
+  },
+  async create(data: { name: string; page: string; config: Record<string, unknown> }): Promise<ApiResponse<SavedView>> {
+    return fetchWithAuth('/saved-views', { method: 'POST', body: JSON.stringify(data) })
+  },
+  async remove(id: string): Promise<ApiResponse<void>> {
+    return fetchWithAuth(`/saved-views/${id}`, { method: 'DELETE' })
+  },
+}
+
 // --------------- MFA (2FA) ---------------
 
 export const mfaApi = {
@@ -901,6 +944,8 @@ export const api = {
   sso: ssoApi,
   roles: rolesApi,
   orgUnits: orgUnitsApi,
+  crm: crmApi,
+  savedViews: savedViewsApi,
 }
 
 

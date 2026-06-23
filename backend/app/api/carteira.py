@@ -199,6 +199,23 @@ def upsert_action(
     except Exception as exc:
         logger.warning("carteira.webhook.dispatch_error", extra={"company_id": company_id, "error": str(exc)})
 
+    # Push ao CRM quando o negócio é fechado (ganho/perdido).
+    if data.status in ("won", "lost"):
+        try:
+            from app.domain.models import CrmConnection
+            has_crm = db.query(CrmConnection).filter_by(
+                company_id=company_id, enabled=True, push_enabled=True
+            ).first()
+            if has_crm:
+                from app.workers.crm_tasks import push_crm_deal
+                push_crm_deal.delay(company_id, {
+                    "customer_name": data.customer_name,
+                    "new_status": data.status,
+                    "expected_value": data.expected_value,
+                })
+        except Exception as exc:
+            logger.warning("carteira.crm.push_error", extra={"company_id": company_id, "error": str(exc)})
+
     return {"success": True, "message": "Ação registrada com sucesso."}
 
 

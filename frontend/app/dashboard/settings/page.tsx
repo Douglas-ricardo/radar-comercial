@@ -61,6 +61,7 @@ export default function SettingsPage() {
   const [companyData, setCompanyData] = useState({
     name: company?.name ?? '',
     purchaseCycleDays: company?.purchaseCycleDays ?? 90,
+    currency: company?.currency ?? 'BRL',
   })
   const [passwordData, setPasswordData] = useState({
     current: '',
@@ -190,9 +191,10 @@ export default function SettingsPage() {
       const response = await api.company.update(company.id, {
         name: companyData.name,
         purchaseCycleDays: companyData.purchaseCycleDays,
+        currency: companyData.currency,
       })
       if (response.success && response.data) {
-        updateCompany({ name: response.data.name, purchaseCycleDays: response.data.purchaseCycleDays })
+        updateCompany({ name: response.data.name, purchaseCycleDays: response.data.purchaseCycleDays, currency: response.data.currency })
         toast.success('Dados da empresa atualizados.')
       } else {
         toast.error(response.error ?? 'Não foi possível salvar os dados da empresa.')
@@ -488,6 +490,19 @@ export default function SettingsPage() {
                     <p className="text-xs text-muted-foreground">
                       Intervalo típico entre compras no seu ramo. Afeta os scores de risco de churn.
                     </p>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="currency">Moeda</FieldLabel>
+                    <Select value={companyData.currency} onValueChange={(v) => setCompanyData((prev) => ({ ...prev, currency: v }))}>
+                      <SelectTrigger id="currency" className="w-48"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="BRL">BRL — Real (R$)</SelectItem>
+                        <SelectItem value="USD">USD — Dólar ($)</SelectItem>
+                        <SelectItem value="EUR">EUR — Euro (€)</SelectItem>
+                        <SelectItem value="GBP">GBP — Libra (£)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Moeda usada na exibição de valores em todo o app.</p>
                   </Field>
                   <Field>
                     <FieldLabel>Plano atual</FieldLabel>

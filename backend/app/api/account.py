@@ -28,6 +28,7 @@ class UpdateCompanyRequest(BaseModel):
     purchase_cycle_days: int | None = None
     ip_allowlist: list[str] | None = None
     audit_retention_days: int | None = None
+    currency: str | None = None
 
 
 @users_router.patch("/{user_id}")
@@ -105,6 +106,12 @@ def update_company(
             raise HTTPException(status_code=400, detail="Retenção de auditoria deve ser entre 30 e 3650 dias.")
         company.audit_retention_days = data.audit_retention_days
 
+    if data.currency is not None:
+        cur = data.currency.strip().upper()
+        if len(cur) != 3 or not cur.isalpha():
+            raise HTTPException(status_code=400, detail="Moeda deve ser um código ISO 4217 (ex: BRL, USD, EUR).")
+        company.currency = cur
+
     if data.ip_allowlist is not None:
         # IP allowlist é recurso enterprise. Valida cada CIDR/IP antes de salvar.
         PlanService.require_feature(company, "ip_allowlist")
@@ -137,6 +144,7 @@ def update_company(
             "purchaseCycleDays": company.purchase_cycle_days,
             "ipAllowlist": company.ip_allowlist or [],
             "auditRetentionDays": company.audit_retention_days,
+            "currency": company.currency,
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,

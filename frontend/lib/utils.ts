@@ -5,10 +5,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Moeda ativa (multi-país). Definida pelo AuthProvider a partir de company.currency.
+let _activeCurrency = 'BRL'
+const _localeFor: Record<string, string> = { BRL: 'pt-BR', USD: 'en-US', EUR: 'de-DE', GBP: 'en-GB' }
+
+export function setActiveCurrency(currency?: string | null): void {
+  if (currency && /^[A-Z]{3}$/.test(currency)) _activeCurrency = currency
+}
+
 export function formatCurrency(value: number | undefined | null): string {
-  return new Intl.NumberFormat('pt-BR', {
+  const locale = _localeFor[_activeCurrency] ?? 'pt-BR'
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency: 'BRL',
+    currency: _activeCurrency,
     minimumFractionDigits: 0,
   }).format(value ?? 0)
 }

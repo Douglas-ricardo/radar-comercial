@@ -14,6 +14,7 @@ import {
 
 import { DashboardHeader }   from '@/components/dashboard/header'
 import { useAuth }           from '@/lib/auth/auth-context'
+import { CohortCard }        from '@/components/insights/cohort-card'
 import { useInsights }       from '@/hooks/use-insights'
 import { formatCurrency }    from '@/lib/format'
 
@@ -435,6 +436,9 @@ export default function InsightsPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Retenção por safra (cohorts) */}
+        {company?.id && <CohortCard companyId={company.id} />}
       </div>
 
       {/* Modal IA */}

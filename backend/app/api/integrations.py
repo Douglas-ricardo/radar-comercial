@@ -460,3 +460,102 @@ def list_deliveries(
             for d in deliveries
         ],
     }
+
+
+# ─── CRM bidirecional (enterprise) ────────────────────────────────────────────
+
+_CRM_PROVIDERS = {"hubspot", "salesforce", "pipedrive"}
+
+
+class CrmConnectionInput(BaseModel):
+    provider: str
+    credentials: dict          # {token} | {api_token} | {access_token, instance_url}
+    push_enabled: bool = True
+    field_map: dict = {}
+
+
+def _serialize_crm(c) -> dict:
+    return {
+        "id": c.id,
+        "provider": c.provider,
+        "enabled": c.enabled,
+        "pushEnabled": c.push_enabled,
+        "fieldMap": c.field_map or {},
+        "lastSyncAt": c.last_sync_at.isoformat() if c.last_sync_at else None,
+        "lastSyncStatus": c.last_sync_status,
+        "lastSyncError": c.last_sync_error,
+        "createdAt": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.get("/crm")
+def list_crm(token_data=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+    from app.domain.models import CrmConnection
+    conns = db.query(CrmConnection).filter_by(company_id=token_data.company_id).all()
+    return {"success": True, "data": [_serialize_crm(c) for c in conns]}
+
+
+@router.post("/crm")
+def create_crm(data: CrmConnectionInput, token_data=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+    from app.domain.models import CrmConnection
+    from app.services.crm import base as crm_base
+    from app.services import audit_service
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores.")
+    company = db.query(Company).filter(Company.id == token_data.company_id).first()
+    PlanService.require_feature(company, "crm_sync")
+    if data.provider not in _CRM_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Provider inválido. Use: {', '.join(_CRM_PROVIDERS)}.")
+
+    # Valida as credenciais contra a API do CRM antes de salvar.
+    try:
+        connector = crm_base.get_connector(data.provider, data.credentials, data.field_map)
+        connector.test_connection()
+    except crm_base.CrmError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    conn = CrmConnection(
+        company_id=token_data.company_id,
+        provider=data.provider,
+        credentials=crm_base.encrypt_credentials(data.credentials),
+        push_enabled=data.push_enabled,
+        field_map=data.field_map,
+    )
+    db.add(conn)
+    db.commit()
+    db.refresh(conn)
+    audit_service.log_action(db, company_id=token_data.company_id, action="crm.connected",
+                             user_id=token_data.user_id, resource_type="crm", resource_id=conn.id,
+                             details={"provider": data.provider})
+    db.commit()
+    return {"success": True, "data": _serialize_crm(conn)}
+
+
+@router.post("/crm/{conn_id}/sync")
+def sync_crm(conn_id: str, token_data=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+    from app.domain.models import CrmConnection
+    from app.workers.crm_tasks import sync_crm_contacts
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores.")
+    conn = db.query(CrmConnection).filter_by(id=conn_id, company_id=token_data.company_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão CRM não encontrada.")
+    sync_crm_contacts.delay(conn_id)
+    return {"success": True, "data": {"queued": True, "message": "Sincronização iniciada."}}
+
+
+@router.delete("/crm/{conn_id}")
+def delete_crm(conn_id: str, token_data=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+    from app.domain.models import CrmConnection
+    from app.services import audit_service
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores.")
+    conn = db.query(CrmConnection).filter_by(id=conn_id, company_id=token_data.company_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão CRM não encontrada.")
+    db.delete(conn)
+    db.commit()
+    audit_service.log_action(db, company_id=token_data.company_id, action="crm.disconnected",
+                             user_id=token_data.user_id, resource_type="crm", resource_id=conn_id)
+    db.commit()
+    return {"success": True}

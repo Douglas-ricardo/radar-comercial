@@ -25,6 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { api, webhooksApi } from '@/lib/api/client'
 import { toast } from 'sonner'
 import type { ApiKey, NewApiKey, SyncConfig, WebhookConfig, WebhookDelivery } from '@/types'
+import { CrmSection } from '@/components/integrations/crm-section'
 
 function formatDate(iso: string | null) {
   if (!iso) return '—'
@@ -220,6 +221,9 @@ function IntegrationsPageContent() {
         description="Gerencie API Keys para ingestão automática de dados via ERP ou n8n"
       />
       <div className="flex-1 p-6 lg:p-8 space-y-6">
+
+        {/* CRM bidirecional */}
+        <CrmSection />
 
         {/* API Keys */}
         <Card className="rounded-2xl border-border shadow-sm">

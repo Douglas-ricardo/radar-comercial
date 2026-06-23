@@ -118,6 +118,7 @@ def _build_auth_response(token: str, user: User, company: Company) -> dict:
             "plan": company.plan,
             "uploadsLimit": company.uploads_limit,
             "uploadsUsed": company.uploads_used,
+            "currency": getattr(company, "currency", "BRL"),
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,
