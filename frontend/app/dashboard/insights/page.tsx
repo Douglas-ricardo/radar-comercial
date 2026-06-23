@@ -36,6 +36,7 @@ import { ChartTooltip }      from '@/components/insights/chart-tooltip'
 import type { Opportunity, CustomerRow } from '@/types/insights'
 import { cn }                from '@/lib/utils'
 import { opportunitiesApi, insightsApi } from '@/lib/api/client'
+import { toast }             from 'sonner'
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ function ChartSkeleton({ height = 320 }: { height?: number }) {
   return (
     <div className="flex items-end gap-2 px-2" style={{ height }}>
       {Array.from({ length: 8 }).map((_, i) => (
-        <Skeleton key={i} className="flex-1 rounded-sm" style={{ height: `${30 + Math.sin(i) * 40 + 40}%` }} />
+        <Skeleton key={i} className="flex-1 rounded-md bg-muted" style={{ height: `${30 + Math.sin(i) * 40 + 40}%` }} />
       ))}
     </div>
   )
@@ -86,7 +87,8 @@ function ChartSkeleton({ height = 320 }: { height?: number }) {
 // ─── Página ──────────────────────────────────────────────────────────────────
 
 export default function InsightsPage() {
-  const { company } = useAuth()
+  const { company, user } = useAuth()
+  const canUseAI = user?.role === 'admin' || user?.role === 'analyst'
   const router = useRouter()
 
   const [dateRange, setDateRange] = useState('6m')
@@ -151,7 +153,9 @@ export default function InsightsPage() {
       const a = document.createElement('a')
       a.href = url; a.download = `relatorio-radar-${dateRange}.pdf`
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
-    } catch { /* silencioso */ } finally { setExportingPdf(false) }
+    } catch {
+      toast.error('Não foi possível gerar o PDF. Tente novamente.')
+    } finally { setExportingPdf(false) }
   }
 
   if (error && !data) {
@@ -167,11 +171,11 @@ export default function InsightsPage() {
     <div className="flex flex-col min-h-screen">
       <DashboardHeader title="Insights" description="Do panorama ao detalhe — comece pelos achados." />
 
-      <div className="flex-1 space-y-6 p-6 md:p-8 max-w-[1600px] mx-auto w-full">
+      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[180px] h-9 text-sm bg-background"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[180px] h-9 text-sm bg-card"><SelectValue /></SelectTrigger>
             <SelectContent>{DATE_RANGE_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="outline" size="sm" className="h-9 gap-2" onClick={handleExportPDF} disabled={!data || isLoading || exportingPdf}>
@@ -181,7 +185,7 @@ export default function InsightsPage() {
 
         {/* Banner de defasagem */}
         {summary?.dataFreshness && summary.dataFreshness !== 'live' && (
-          <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/[0.08] px-4 py-3 text-sm text-foreground">
+          <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/[0.08] px-4 py-3 text-sm text-foreground">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-warning" />
             <div><span className="font-medium">Dados {summary.dataFreshness}.</span> Oportunidades calculadas na data mais recente do arquivo — faça um upload novo para refletir hoje.</div>
           </div>
@@ -189,15 +193,15 @@ export default function InsightsPage() {
 
         {/* CAMADA 1 — Achados */}
         {isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
+          <div className="grid gap-4 sm:grid-cols-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-2xl bg-muted" />)}</div>
         ) : findings.length > 0 && (
           <div>
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">O que encontramos</h2>
             <div className="grid gap-4 sm:grid-cols-3">
               {findings.map((f, i) => (
-                <Card key={i} className="flex flex-col justify-between">
+                <Card key={i} className="flex flex-col justify-between rounded-2xl shadow-sm transition-all hover:shadow-md">
                   <CardContent className="pt-6">
-                    <p className={cn('tabular-nums', f.tone, f.serif ? 'font-serif text-3xl leading-none' : 'font-mono text-2xl')}>{f.value}</p>
+                    <p className={cn('font-[family-name:var(--font-display)] tracking-[-0.02em] tabular-nums', f.tone, f.serif ? 'text-3xl font-extrabold leading-none' : 'text-2xl font-bold')}>{f.value}</p>
                     <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{f.text}</p>
                   </CardContent>
                   <div className="px-6 pb-4">
@@ -228,7 +232,7 @@ export default function InsightsPage() {
           <TabsList className="h-10 bg-secondary p-1">
             <TabsTrigger value="oportunidades" className="text-sm px-4">
               Oportunidades
-              {opportunities.length > 0 && <Badge className="ml-2 h-4 px-1.5 text-[10px] font-semibold bg-primary/10 text-primary border-0 tabular-nums">{opportunities.length}</Badge>}
+              {opportunities.length > 0 && <Badge className="ml-2 h-4 px-1.5 text-[10px] font-semibold bg-primary/10 text-primary border-0 rounded-full tabular-nums">{opportunities.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="analise" className="text-sm px-4">Análise</TabsTrigger>
           </TabsList>
@@ -237,14 +241,14 @@ export default function InsightsPage() {
           <TabsContent value="oportunidades" className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Select value={filterType} onValueChange={(v) => setFilterType(v as typeof filterType)}>
-                <SelectTrigger className="h-9 w-[170px] text-sm bg-background"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 w-[170px] text-sm bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os tipos</SelectItem>
                   {(Object.entries(OPPORTUNITY_TYPE_LABELS) as [Opportunity['type'], string][]).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Select value={filterConfidence} onValueChange={(v) => setFilterConfidence(v as typeof filterConfidence)}>
-                <SelectTrigger className="h-9 w-[150px] text-sm bg-background"><SelectValue placeholder="Confiança" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-[150px] text-sm bg-card"><SelectValue placeholder="Confiança" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Toda confiança</SelectItem>
                   <SelectItem value="high">Alta</SelectItem>
@@ -252,14 +256,14 @@ export default function InsightsPage() {
                   <SelectItem value="low">Baixa</SelectItem>
                 </SelectContent>
               </Select>
-              <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-9 w-[150px] text-sm" />
+              <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-9 w-[150px] text-sm bg-card" />
               <span className="ml-auto text-sm text-muted-foreground tabular-nums">{filteredOpportunities.length} de {opportunities.length}</span>
             </div>
 
-            <Card>
+            <Card className="rounded-2xl shadow-sm">
               <CardContent className="p-0">
                 {isLoading ? (
-                  <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+                  <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-muted" />)}</div>
                 ) : filteredOpportunities.length === 0 ? (
                   <EmptyState title="Nenhuma oportunidade" description="Ajuste os filtros ou faça um novo upload." />
                 ) : (
@@ -275,9 +279,9 @@ export default function InsightsPage() {
                     <TableBody>
                       {filteredOpportunities.map((opp) => (
                         <Fragment key={opp.id}>
-                          <TableRow className="cursor-pointer transition-colors hover:bg-muted/50" onClick={() => setExpanded(expanded === opp.id ? null : opp.id)}>
+                          <TableRow className="cursor-pointer transition-colors hover:bg-accent/50" onClick={() => setExpanded(expanded === opp.id ? null : opp.id)}>
                             <TableCell className="pl-6 font-medium">{opp.customer}</TableCell>
-                            <TableCell className="text-right font-mono tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</TableCell>
                             <TableCell className="text-right pr-2"><ConfidenceBadge confidence={opp.confidence} /></TableCell>
                             <TableCell className="w-10 pr-6"><ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform ml-auto', expanded === opp.id && 'rotate-180')} /></TableCell>
                           </TableRow>
@@ -291,9 +295,11 @@ export default function InsightsPage() {
                                   <div><p className="text-xs text-muted-foreground">Frequência</p><p className="font-medium">{opp.frequency ?? 'Irregular'}</p></div>
                                 </div>
                                 {opp.description && <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{opp.description}</p>}
-                                <Button size="sm" variant="outline" className="mt-4 gap-1.5" onClick={(e) => { e.stopPropagation(); handleGenerateMessage(opp) }}>
-                                  <Sparkles className="h-3.5 w-3.5" /> Gerar mensagem
-                                </Button>
+                                {canUseAI && (
+                                  <Button size="sm" variant="outline" className="mt-4 gap-1.5" onClick={(e) => { e.stopPropagation(); handleGenerateMessage(opp) }}>
+                                    <Sparkles className="h-3.5 w-3.5" /> Gerar mensagem
+                                  </Button>
+                                )}
                               </TableCell>
                             </TableRow>
                           )}
@@ -308,8 +314,8 @@ export default function InsightsPage() {
 
           {/* ── Análise: gráficos de apoio + clientes + sazonalidade ── */}
           <TabsContent value="analise" className="space-y-6">
-            <Card>
-              <CardHeader className="pb-4"><CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Receita vs. receita perdida</CardTitle><CardDescription>Evolução ao longo do tempo</CardDescription></CardHeader>
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Receita vs. receita perdida</CardTitle><CardDescription>Evolução ao longo do tempo</CardDescription></CardHeader>
               <CardContent>
                 {isLoading ? <ChartSkeleton height={300} /> : (
                   <div className="h-[300px]">
@@ -334,8 +340,8 @@ export default function InsightsPage() {
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <CardHeader className="pb-4"><CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Gap de produtos</CardTitle><CardDescription>Esperado versus realizado</CardDescription></CardHeader>
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Gap de produtos</CardTitle><CardDescription>Esperado versus realizado</CardDescription></CardHeader>
                 <CardContent>
                   {isLoading ? <ChartSkeleton height={280} /> : productGaps.length === 0 ? <EmptyState title="Sem gaps" description="Nada significativo no período." /> : (
                     <div className="h-[280px]">
@@ -353,8 +359,8 @@ export default function InsightsPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-4"><CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Distribuição por cliente</CardTitle><CardDescription>Participação na receita</CardDescription></CardHeader>
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Distribuição por cliente</CardTitle><CardDescription>Participação na receita</CardDescription></CardHeader>
                 <CardContent>
                   {isLoading ? <ChartSkeleton height={280} /> : customerDistribution.length === 0 ? <EmptyState title="Sem dados" description="Faça upload de uma base." /> : (
                     <div className="h-[280px]">
@@ -374,10 +380,10 @@ export default function InsightsPage() {
             </div>
 
             {/* Clientes — lista enxuta */}
-            <Card>
-              <CardHeader className="pb-4"><CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Desempenho de clientes</CardTitle><CardDescription>Clique para ver o perfil completo</CardDescription></CardHeader>
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Desempenho de clientes</CardTitle><CardDescription>Clique para ver o perfil completo</CardDescription></CardHeader>
               <CardContent className="p-0">
-                {isLoading ? <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div> : customerDistribution.length === 0 ? (
+                {isLoading ? <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-muted" />)}</div> : customerDistribution.length === 0 ? (
                   <EmptyState title="Sem dados de clientes" description="Faça upload de uma base." action={{ label: 'Importar dados', onClick: () => router.push('/dashboard/upload') }} />
                 ) : (
                   <Table>
@@ -392,9 +398,9 @@ export default function InsightsPage() {
                     </TableHeader>
                     <TableBody>
                       {customerDistribution.map((c) => (
-                        <TableRow key={c.id} className="cursor-pointer transition-colors hover:bg-muted/50 group" onClick={() => router.push(`/dashboard/clientes/${c.id}`)}>
+                        <TableRow key={c.id} className="cursor-pointer transition-colors hover:bg-accent/50 group" onClick={() => router.push(`/dashboard/clientes/${c.id}`)}>
                           <TableCell className="pl-6 font-medium">{c.name}</TableCell>
-                          <TableCell className="text-right font-mono tabular-nums">{formatCurrency(c.value)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatCurrency(c.value)}</TableCell>
                           <TableCell className="text-right text-muted-foreground tabular-nums">{c.percentage}%</TableCell>
                           <TableCell className="text-right"><TrendCell trend={c.trend} /></TableCell>
                           <TableCell className="pr-6 w-8"><ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" /></TableCell>
@@ -407,8 +413,8 @@ export default function InsightsPage() {
             </Card>
 
             {/* Sazonalidade */}
-            <Card>
-              <CardHeader className="pb-4"><CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Sazonalidade</CardTitle><CardDescription>Atual versus média histórica</CardDescription></CardHeader>
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Sazonalidade</CardTitle><CardDescription>Atual versus média histórica</CardDescription></CardHeader>
               <CardContent>
                 {isLoading ? <ChartSkeleton height={300} /> : seasonalityData.length === 0 ? <EmptyState title="Sem sazonalidade" description="São necessários 12+ meses de histórico." /> : (
                   <div className="h-[300px]">
@@ -435,10 +441,10 @@ export default function InsightsPage() {
       <Dialog open={msgModal.open} onOpenChange={(open) => setMsgModal((m) => ({ ...m, open }))}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Mensagem para WhatsApp</DialogTitle></DialogHeader>
-          {msgModal.loading ? <div className="space-y-2 py-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /><Skeleton className="h-4 w-4/6" /></div> : <Textarea className="min-h-[160px] resize-none text-sm" value={msgModal.text} onChange={(e) => setMsgModal((m) => ({ ...m, text: e.target.value }))} />}
+          {msgModal.loading ? <div className="space-y-2 py-4"><Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" /></div> : <Textarea className="min-h-[160px] resize-none text-sm" value={msgModal.text} onChange={(e) => setMsgModal((m) => ({ ...m, text: e.target.value }))} />}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsgModal((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msgModal.loading || !msgModal.text} onClick={() => navigator.clipboard.writeText(msgModal.text)}>Copiar</Button>
+            <Button disabled={msgModal.loading || !msgModal.text} onClick={() => navigator.clipboard.writeText(msgModal.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

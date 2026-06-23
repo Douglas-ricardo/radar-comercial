@@ -116,9 +116,9 @@ export default function UploadPage() {
 
         <div className="grid gap-8 lg:grid-cols-3 xl:gap-10 items-start">
           {/* Coluna principal */}
-          <Card className="lg:col-span-2">
+          <Card className="lg:col-span-2 rounded-2xl border-border shadow-sm">
             <CardHeader>
-              <CardTitle className="font-serif text-xl tracking-[-0.01em]">
+              <CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">
                 {isCompleted ? 'Processamento concluído' : 'Área de upload'}
               </CardTitle>
               {!isCompleted && (
@@ -132,9 +132,9 @@ export default function UploadPage() {
 
           {/* Coluna lateral — documentação */}
           <aside className="space-y-6" aria-label="Instruções de upload">
-            <Card>
+            <Card className="rounded-2xl border-border shadow-sm overflow-hidden">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 font-serif text-base font-medium tracking-[-0.01em]">
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">
                   <TableProperties className="h-5 w-5 text-primary" aria-hidden="true" />
                   Estrutura do arquivo
                 </CardTitle>
@@ -147,7 +147,7 @@ export default function UploadPage() {
                   {REQUIRED_COLUMNS.map((col) => (
                     <div
                       key={col.name}
-                      className="px-6 py-3 hover:bg-muted/40 transition-colors"
+                      className="px-6 py-3 hover:bg-accent/30 transition-colors"
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <code className="text-xs font-mono font-medium bg-muted px-1.5 py-0.5 rounded text-foreground">
@@ -162,7 +162,7 @@ export default function UploadPage() {
                   ))}
                 </dl>
               </CardContent>
-              <CardFooter className="flex-col gap-2 pt-4 border-t border-border bg-muted/10">
+              <CardFooter className="flex-col gap-2 pt-4 border-t border-border bg-muted/20">
                 <Button
                   variant="outline"
                   size="sm"
@@ -170,21 +170,15 @@ export default function UploadPage() {
                   onClick={() => downloadTemplate('template_radar_comercial.csv')}
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
-                  Template CSV
+                  Baixar modelo (CSV)
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
-                  onClick={() => downloadTemplate('template_radar_comercial.xlsx')}
-                >
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                  Template Excel
-                </Button>
+                <p className="px-1 text-[11px] text-muted-foreground">
+                  Abre direto no Excel e no Google Sheets.
+                </p>
               </CardFooter>
             </Card>
 
-            <div className="rounded-lg border border-warning/30 bg-warning/[0.06] p-5">
+            <div className="rounded-2xl border border-warning/30 bg-warning/[0.06] p-5 shadow-sm">
               <div className="flex gap-3">
                 <Lightbulb className="h-5 w-5 text-warning shrink-0 mt-0.5" aria-hidden="true" />
                 <div>

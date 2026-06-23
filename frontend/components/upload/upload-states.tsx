@@ -37,17 +37,17 @@ export function ConfirmState({
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-300">
-      <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-primary/20 rounded-xl bg-primary/5">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-background border border-border shadow-sm mb-4">
-          <FileSpreadsheet className="h-8 w-8 text-primary" aria-hidden="true" />
+      <div className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-border rounded-2xl bg-accent/30">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent text-primary mb-4">
+          <FileSpreadsheet className="h-8 w-8" aria-hidden="true" />
         </div>
-        <h3 className="font-serif text-lg text-foreground">{file.name}</h3>
+        <h3 className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">{file.name}</h3>
         <p className="text-sm text-muted-foreground tabular-nums">{fileSizeMB} MB</p>
 
         {isFailed && errorMessage && (
           <div
             role="alert"
-            className="mt-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 max-w-sm w-full animate-in slide-in-from-top-2"
+            className="mt-4 mb-2 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 max-w-sm w-full animate-in slide-in-from-top-2"
           >
             <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" aria-hidden="true" />
             <p className="text-sm text-destructive font-medium">{errorMessage}</p>
@@ -92,14 +92,14 @@ interface CompletedStateProps {
 
 export function CompletedState({ onNewUpload, onViewInsights }: CompletedStateProps) {
   return (
-    <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center py-12 text-center rounded-xl bg-gradient-to-b from-success/10 to-transparent border border-success/20">
+    <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center py-14 text-center rounded-2xl border border-border bg-card shadow-sm">
       <div
-        className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-success/20 ring-8 ring-success/10"
+        className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-success/15 ring-8 ring-success/[0.06]"
         aria-hidden="true"
       >
         <CheckCircle2 className="h-10 w-10 text-success" />
       </div>
-      <h2 className="font-serif text-3xl tracking-tight text-foreground">
+      <h2 className="font-[family-name:var(--font-display)] text-3xl font-extrabold tracking-[-0.02em] text-foreground">
         Análise concluída!
       </h2>
       <p className="mt-3 max-w-md text-sm text-muted-foreground leading-relaxed">

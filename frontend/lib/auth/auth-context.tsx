@@ -120,6 +120,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           type: 'SET_USER',
           payload: { user: response.data.user, company: response.data.company },
         })
+        // Usuário convidado com senha temporária → forçar troca antes de entrar
+        if ((response.data as { requiresPasswordChange?: boolean }).requiresPasswordChange) {
+          router.push('/set-password')
+          return
+        }
       } else {
         dispatch({ type: 'SET_LOADING', payload: false })
         throw new Error(response.error ?? 'Credenciais inválidas')
@@ -128,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: false })
       throw error
     }
-  }, [])
+  }, [router])
 
   const signup = useCallback(async (data: SignupData) => {
     dispatch({ type: 'SET_LOADING', payload: true })

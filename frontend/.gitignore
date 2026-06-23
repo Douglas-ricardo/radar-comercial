@@ -19,6 +19,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# ── Playwright (E2E) ──────────────────────────────────────────────────────────
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ── Sentry ────────────────────────────────────────────────────────────────────
+.sentryclirc
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 .vercel
 .turbo

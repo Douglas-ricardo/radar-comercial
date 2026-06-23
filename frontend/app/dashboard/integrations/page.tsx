@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { DashboardHeader } from '@/components/dashboard/header'
+import { ProtectedRoute } from '@/lib/auth/protected-route'
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from '@/components/ui/card'
@@ -29,7 +30,7 @@ function formatDate(iso: string | null) {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso))
 }
 
-export default function IntegrationsPage() {
+function IntegrationsPageContent() {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
@@ -50,21 +51,31 @@ export default function IntegrationsPage() {
 
   const loadKeys = useCallback(async () => {
     setIsLoading(true)
-    const res = await api.integrations.listKeys()
-    if (res.success && res.data) setKeys(res.data)
-    setIsLoading(false)
+    try {
+      const res = await api.integrations.listKeys()
+      if (res.success && res.data) setKeys(res.data)
+    } catch {
+      toast.error('Não foi possível carregar as chaves de API.')
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
   const loadSyncConfig = useCallback(async () => {
     setSyncLoading(true)
-    const res = await api.integrations.getSyncStatus()
-    if (res.success && res.data) {
-      setSyncConfig(res.data)
-      setSheetUrl(res.data.sheetUrl ?? '')
-      setSheetName(res.data.sheetName ?? '')
-      setSyncEnabled(res.data.enabled)
+    try {
+      const res = await api.integrations.getSyncStatus()
+      if (res.success && res.data) {
+        setSyncConfig(res.data)
+        setSheetUrl(res.data.sheetUrl ?? '')
+        setSheetName(res.data.sheetName ?? '')
+        setSyncEnabled(res.data.enabled)
+      }
+    } catch {
+      toast.error('Não foi possível carregar a configuração de sincronização.')
+    } finally {
+      setSyncLoading(false)
     }
-    setSyncLoading(false)
   }, [])
 
   useEffect(() => {
@@ -157,21 +168,23 @@ export default function IntegrationsPage() {
         title="Integrações"
         description="Gerencie API Keys para ingestão automática de dados via ERP ou n8n"
       />
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6">
 
         {/* API Keys */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 font-serif text-lg font-medium tracking-[-0.01em]">
-                <Key className="h-5 w-5" />
+        <Card className="rounded-2xl border-border shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div className="space-y-1.5">
+              <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+                  <Key className="h-4 w-4" />
+                </span>
                 API Keys
               </CardTitle>
               <CardDescription>
-                Use estas chaves no header <code className="bg-muted px-1 rounded text-xs">X-API-Key</code> para ingerir dados via <code className="bg-muted px-1 rounded text-xs">POST /api/data/ingest</code>
+                Use estas chaves no header <code className="bg-muted px-1 rounded text-xs font-mono">X-API-Key</code> para ingerir dados via <code className="bg-muted px-1 rounded text-xs font-mono">POST /api/data/ingest</code>
               </CardDescription>
             </div>
-            <Button onClick={() => setShowCreateDialog(true)} size="sm">
+            <Button onClick={() => setShowCreateDialog(true)} size="sm" className="shrink-0">
               <Plus className="h-4 w-4 mr-2" />
               Nova chave
             </Button>
@@ -182,24 +195,28 @@ export default function IntegrationsPage() {
                 <Spinner className="h-6 w-6" />
               </div>
             ) : keys.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Plug2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">Nenhuma chave criada ainda.</p>
-                <p className="text-xs mt-1">Crie uma chave para integrar seu ERP ou n8n.</p>
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent mb-4">
+                  <Plug2 className="h-7 w-7 text-primary" />
+                </div>
+                <p className="font-medium text-foreground">Nenhuma chave criada ainda</p>
+                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                  Crie uma chave para integrar seu ERP ou n8n e enviar dados automaticamente.
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
                 {keys.map((key) => (
                   <div
                     key={key.id}
-                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
+                    className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-all hover:shadow-md hover:border-primary/30"
                   >
-                    <div className="space-y-0.5">
-                      <p className="font-medium text-sm">{key.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono">
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm text-foreground truncate">{key.name}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">
                         {key.prefix}••••••••••••••••••••
                       </p>
-                      <div className="flex items-center gap-3 mt-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           Criada {formatDate(key.createdAt)}
@@ -214,8 +231,9 @@ export default function IntegrationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="text-destructive hover:text-destructive h-8 w-8"
+                      className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
                       onClick={() => setRevokeTarget(key)}
+                      aria-label={`Revogar chave ${key.name}`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -227,10 +245,12 @@ export default function IntegrationsPage() {
         </Card>
 
         {/* Google Sheets Sync */}
-        <Card>
+        <Card className="rounded-2xl border-border shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 font-serif text-lg font-medium tracking-[-0.01em]">
-              <RefreshCw className="h-5 w-5" />
+            <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+                <RefreshCw className="h-4 w-4" />
+              </span>
               Sincronização Google Sheets
             </CardTitle>
             <CardDescription>
@@ -245,7 +265,7 @@ export default function IntegrationsPage() {
             ) : (
               <div className="space-y-4">
                 {syncConfig?.lastSyncAt && (
-                  <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+                  <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
                     syncConfig.lastSyncStatus === 'error'
                       ? 'border-destructive/40 bg-destructive/5 text-destructive'
                       : 'border-border bg-muted/40 text-muted-foreground'
@@ -286,9 +306,9 @@ export default function IntegrationsPage() {
                   />
                 </Field>
 
-                <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/20 px-4 py-3">
                   <div>
-                    <p className="text-sm font-medium">Sincronização automática</p>
+                    <p className="text-sm font-medium text-foreground">Sincronização automática</p>
                     <p className="text-xs text-muted-foreground">Atualiza a cada 6 horas automaticamente</p>
                   </div>
                   <Switch
@@ -323,13 +343,13 @@ export default function IntegrationsPage() {
         </Card>
 
         {/* Docs */}
-        <Card>
+        <Card className="rounded-2xl border-border shadow-sm">
           <CardHeader>
-            <CardTitle className="font-serif text-base font-medium tracking-[-0.01em]">Como usar</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">Como usar</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-muted-foreground">
             <p>Envie dados de vendas programaticamente com uma requisição POST:</p>
-            <pre className="bg-muted rounded-lg p-4 text-xs overflow-auto">
+            <pre className="bg-muted border border-border rounded-xl p-4 text-xs overflow-auto font-mono text-foreground">
 {`POST /api/data/ingest
 X-API-Key: rc_live_sua_chave_aqui
 Content-Type: application/json
@@ -352,12 +372,12 @@ Content-Type: application/json
               para acompanhar o processamento.
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
-              <Badge variant="secondary">n8n</Badge>
-              <Badge variant="secondary">Omie</Badge>
-              <Badge variant="secondary">Bling</Badge>
-              <Badge variant="secondary">Conta Azul</Badge>
-              <Badge variant="secondary">Google Sheets</Badge>
-              <Badge variant="secondary">Zapier</Badge>
+              <Badge variant="secondary" className="rounded-full">n8n</Badge>
+              <Badge variant="secondary" className="rounded-full">Omie</Badge>
+              <Badge variant="secondary" className="rounded-full">Bling</Badge>
+              <Badge variant="secondary" className="rounded-full">Conta Azul</Badge>
+              <Badge variant="secondary" className="rounded-full">Google Sheets</Badge>
+              <Badge variant="secondary" className="rounded-full">Zapier</Badge>
             </div>
           </CardContent>
         </Card>
@@ -407,7 +427,7 @@ Content-Type: application/json
               Copie e guarde agora — esta chave não será exibida novamente.
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg border bg-muted p-3 font-mono text-sm break-all">
+          <div className="rounded-xl border border-primary/30 bg-accent/40 p-3.5 font-mono text-sm break-all text-foreground">
             {createdKey?.key}
           </div>
           <Button
@@ -449,5 +469,13 @@ Content-Type: application/json
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+export default function IntegrationsPage() {
+  return (
+    <ProtectedRoute requiredRoles={['admin']}>
+      <IntegrationsPageContent />
+    </ProtectedRoute>
   )
 }

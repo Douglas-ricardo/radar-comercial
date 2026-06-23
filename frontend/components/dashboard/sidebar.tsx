@@ -32,16 +32,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-type NavEntry = { name: string; href: string; icon: LucideIcon; badge: string | null }
+type Role = 'admin' | 'analyst' | 'viewer'
+type NavEntry = { name: string; href: string; icon: LucideIcon; badge: string | null; roles?: Role[] }
 
-// Agrupada por intenção: o loop diário (Operação) no topo; análise no meio; conta embaixo.
+// roles ausente = todos os papéis têm acesso
 const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
   {
     label: 'Operação',
     items: [
       { name: 'Visão geral', href: '/dashboard', icon: LayoutDashboard, badge: null },
       { name: 'Carteira', href: '/dashboard/carteira', icon: Briefcase, badge: null },
-      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: 'novo' },
+      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: 'novo', roles: ['admin', 'analyst'] },
     ],
   },
   {
@@ -53,9 +54,9 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
   {
     label: 'Conta',
     items: [
-      { name: 'Equipe', href: '/dashboard/team', icon: Users, badge: null },
-      { name: 'Integrações', href: '/dashboard/integrations', icon: Plug2, badge: null },
-      { name: 'Faturamento', href: '/dashboard/billing', icon: CreditCard, badge: null },
+      { name: 'Equipe', href: '/dashboard/team', icon: Users, badge: null, roles: ['admin'] },
+      { name: 'Integrações', href: '/dashboard/integrations', icon: Plug2, badge: null, roles: ['admin'] },
+      { name: 'Faturamento', href: '/dashboard/billing', icon: CreditCard, badge: null, roles: ['admin'] },
       { name: 'Configurações', href: '/dashboard/settings', icon: Settings, badge: null },
     ],
   },
@@ -134,7 +135,8 @@ function NavItem({ item, collapsed }: NavItemProps) {
 }
 
 export function DashboardSidebar() {
-  const { company } = useAuth()
+  const { company, user } = useAuth()
+  const userRole = (user?.role ?? 'viewer') as Role
   const [collapsed, setCollapsed] = useState(false)
   const [toContact, setToContact] = useState(0)
 
@@ -192,26 +194,32 @@ export function DashboardSidebar() {
 
         {/* Navegação principal — agrupada por intenção */}
         <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-4" aria-label="Menu">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label} className="space-y-1">
-              {!collapsed && (
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  {group.label}
-                </p>
-              )}
-              {group.items.map((item) => (
-                <NavItem
-                  key={item.name}
-                  item={
-                    item.href === '/dashboard/carteira' && toContact > 0
-                      ? { ...item, badge: String(toContact) }
-                      : item
-                  }
-                  collapsed={collapsed}
-                />
-              ))}
-            </div>
-          ))}
+          {NAV_GROUPS.map((group) => {
+            const visibleItems = group.items.filter(
+              (item) => !item.roles || item.roles.includes(userRole)
+            )
+            if (visibleItems.length === 0) return null
+            return (
+              <div key={group.label} className="space-y-1">
+                {!collapsed && (
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                    {group.label}
+                  </p>
+                )}
+                {visibleItems.map((item) => (
+                  <NavItem
+                    key={item.name}
+                    item={
+                      item.href === '/dashboard/carteira' && toContact > 0
+                        ? { ...item, badge: String(toContact) }
+                        : item
+                    }
+                    collapsed={collapsed}
+                  />
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         {/* Indicador de uso — expandido */}

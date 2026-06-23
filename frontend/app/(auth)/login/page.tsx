@@ -19,7 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Activity } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff, ArrowRight, Mail, Lock, Radar } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -54,9 +54,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-[400px] shadow-sm sm:rounded-2xl">
         <CardHeader className="space-y-3 pb-6 pt-8 text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <Activity className="h-6 w-6 text-primary" aria-hidden="true" />
+            <Radar className="h-6 w-6 text-primary" aria-hidden="true" />
           </div>
-          <CardTitle className="font-serif text-2xl tracking-[-0.01em]">
+          <CardTitle className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">
             Bem-vindo de volta
           </CardTitle>
           <CardDescription className="text-base font-medium text-muted-foreground/80">

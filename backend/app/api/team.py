@@ -6,7 +6,7 @@ from typing import Literal
 import re
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.domain.models import User, Company
 from app.core.auth import get_current_user_and_company
 from app.services.plan_service import PlanService
 from app.services.notification_service import NotificationService
+from app.api.billing import sync_subscription_seats
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,17 @@ class UpdateRoleRequest(BaseModel):
 @router.get("/{company_id}")
 def list_team_members(
     company_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
 ):
     if token_data.company_id != company_id:
         raise HTTPException(status_code=403, detail="Acesso negado.")
 
-    users = db.query(User).filter(User.company_id == company_id).all()
+    base = db.query(User).filter(User.company_id == company_id)
+    total = base.count()
+    users = base.offset(offset).limit(limit).all()
 
     return {
         "success": True,
@@ -68,6 +73,7 @@ def list_team_members(
             }
             for u in users
         ],
+        "pagination": {"total": total, "limit": limit, "offset": offset},
     }
 
 
@@ -107,6 +113,9 @@ def invite_member(
     db.add(new_user)
     db.commit()
 
+    # Cobrança per-seat: ajusta a assinatura ao novo nº de usuários.
+    sync_subscription_seats(company_id, db)
+
     logger.info(
         "team.invite.sent",
         extra={"company_id": company_id, "invited_email": data.email, "role": data.role},
@@ -145,6 +154,9 @@ def remove_member(
 
     db.delete(user_to_delete)
     db.commit()
+
+    # Cobrança per-seat: reduz a assinatura ao novo nº de usuários.
+    sync_subscription_seats(token_data.company_id, db)
 
     logger.info("team.member.removed", extra={"removed_user_id": user_id, "admin_id": token_data.user_id})
 

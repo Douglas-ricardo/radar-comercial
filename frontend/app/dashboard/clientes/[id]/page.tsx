@@ -28,6 +28,7 @@ import { EmptyState }         from '@/components/insights/empty-state'
 import { ChartTooltip }       from '@/components/insights/chart-tooltip'
 import type { CustomerAlert, CustomerRFV } from '@/types/customer'
 import { opportunitiesApi } from '@/lib/api/client'
+import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -81,8 +82,8 @@ const RFV_SCORE_COLORS = ['var(--destructive)', 'var(--warning)', 'var(--warning
 function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-4">
-      <span className="text-muted-foreground">{icon}</span>
-      <h2 className="font-serif text-base font-medium text-foreground">{children}</h2>
+      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-primary">{icon}</span>
+      <h2 className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em] text-foreground">{children}</h2>
     </div>
   )
 }
@@ -105,14 +106,14 @@ function RfvBlock({ rfv }: { rfv: CustomerRFV }) {
   const segment = RFV_SEGMENT_CONFIG[rfv.segment]
 
   return (
-    <Card>
+    <Card className="rounded-2xl shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div>
-            <CardTitle className="font-serif text-base font-medium">Métricas RFV</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">Métricas RFV</CardTitle>
             <CardDescription className="text-xs mt-0.5">Recência · Frequência · Valor</CardDescription>
           </div>
-          <Badge className={cn('text-xs font-medium border-0', segment.className)}>
+          <Badge className={cn('text-xs font-medium border-0 rounded-full', segment.className)}>
             {segment.label}
           </Badge>
         </div>
@@ -141,22 +142,22 @@ function RfvBlock({ rfv }: { rfv: CustomerRFV }) {
 
 function PageSkeleton() {
   return (
-    <div className="space-y-8 p-6 md:p-8 max-w-[1200px] mx-auto w-full">
+    <div className="space-y-8 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
       <div className="flex items-center gap-3">
-        <Skeleton className="h-8 w-8 rounded" />
-        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-8 w-8 rounded-lg bg-muted" />
+        <Skeleton className="h-6 w-48 bg-muted" />
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}>
-            <CardHeader className="pb-2"><Skeleton className="h-3 w-24" /></CardHeader>
-            <CardContent><Skeleton className="h-7 w-32" /></CardContent>
+          <Card key={i} className="rounded-2xl shadow-sm">
+            <CardHeader className="pb-2"><Skeleton className="h-3 w-24 bg-muted" /></CardHeader>
+            <CardContent><Skeleton className="h-7 w-32 bg-muted" /></CardContent>
           </Card>
         ))}
       </div>
       <div className="grid gap-6 lg:grid-cols-3">
-        <Skeleton className="h-64 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl lg:col-span-2" />
+        <Skeleton className="h-64 rounded-2xl bg-muted" />
+        <Skeleton className="h-64 rounded-2xl bg-muted lg:col-span-2" />
       </div>
     </div>
   )
@@ -170,7 +171,8 @@ export default function CustomerDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const { company } = useAuth()
+  const { company, user } = useAuth()
+  const canUseAI = user?.role === 'admin' || user?.role === 'analyst'
   const router      = useRouter()
 
   const { data, isLoading, error, refetch } = useCustomerDetail(company?.id, id)
@@ -238,7 +240,7 @@ export default function CustomerDetailPage({
 
           <div className="flex items-center gap-2 shrink-0">
             {trendIcon}
-            <Badge className={cn('text-xs border-0', RFV_SEGMENT_CONFIG[data.rfv.segment].className)}>
+            <Badge className={cn('text-xs border-0 rounded-full', RFV_SEGMENT_CONFIG[data.rfv.segment].className)}>
               {RFV_SEGMENT_CONFIG[data.rfv.segment].label}
             </Badge>
           </div>
@@ -246,10 +248,10 @@ export default function CustomerDetailPage({
       </div>
 
       {/* ── Conteúdo ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 p-6 md:p-8 max-w-[1200px] mx-auto w-full space-y-8">
+      <div className="flex-1 p-6 lg:p-8 max-w-[1200px] mx-auto w-full space-y-8">
 
         <div>
-          <h1 className="font-serif text-2xl tracking-[-0.01em]">{data.name}</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">{data.name}</h1>
           {data.document && (
             <p className="text-sm text-muted-foreground mt-0.5">{data.document}</p>
           )}
@@ -257,40 +259,42 @@ export default function CustomerDetailPage({
 
         {/* Ação recomendada — hoisted ao topo */}
         {topAlert && (
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/20 bg-primary/[0.04] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/20 bg-accent/40 p-5 shadow-sm">
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Ação recomendada</p>
-              <p className="mt-1 font-serif text-3xl leading-none text-primary tabular-nums">{formatCurrency(recoverable)}</p>
+              <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{formatCurrency(recoverable)}</p>
               <p className="mt-1.5 text-sm text-muted-foreground">{topAlert.description}</p>
             </div>
-            <Button onClick={generateMessage} className="gap-2 shrink-0">
-              <Sparkles className="h-4 w-4" /> Gerar mensagem
-            </Button>
+            {canUseAI && (
+              <Button onClick={generateMessage} className="gap-2 shrink-0">
+                <Sparkles className="h-4 w-4" /> Gerar mensagem
+              </Button>
+            )}
           </div>
         )}
 
         {/* ── KPIs ──────────────────────────────────────────────────────────── */}
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
+          <Card className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Receita total
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="font-serif text-3xl tracking-tight tabular-nums">{formatCurrency(data.totalRevenue)}</p>
+              <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold tracking-[-0.02em] tabular-nums">{formatCurrency(data.totalRevenue)}</p>
               <p className="text-xs text-muted-foreground mt-1">{data.percentage}% da receita da empresa</p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Última compra
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="font-serif text-3xl tracking-tight tabular-nums">{data.rfv.recency}d atrás</p>
+              <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold tracking-[-0.02em] tabular-nums">{data.rfv.recency}d atrás</p>
               <p className="text-xs text-muted-foreground mt-1">
                 {data.rfv.recency <= 30  ? 'Ativo recentemente' :
                  data.rfv.recency <= 90  ? 'Atenção recomendada' :
@@ -299,14 +303,14 @@ export default function CustomerDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Frequência
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="font-serif text-3xl tracking-tight tabular-nums">{data.rfv.frequency} compras</p>
+              <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold tracking-[-0.02em] tabular-nums">{data.rfv.frequency} compras</p>
               <p className="text-xs text-muted-foreground mt-1">no período analisado</p>
             </CardContent>
           </Card>
@@ -316,9 +320,9 @@ export default function CustomerDetailPage({
         <div className="grid gap-6 lg:grid-cols-3">
           <RfvBlock rfv={data.rfv} />
 
-          <Card className="lg:col-span-2">
+          <Card className="rounded-2xl shadow-sm lg:col-span-2">
             <CardHeader className="pb-2">
-              <CardTitle className="font-serif text-base font-medium">Evolução de receita</CardTitle>
+              <CardTitle className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">Evolução de receita</CardTitle>
               <CardDescription className="text-xs">Histórico mensal de compras</CardDescription>
             </CardHeader>
             <CardContent>
@@ -386,19 +390,19 @@ export default function CustomerDetailPage({
               description="Nenhum produto registrado para este cliente."
             />
           ) : (
-            <Card>
+            <Card className="rounded-2xl shadow-sm">
               <CardContent className="p-0">
-                <div className="divide-y">
+                <div className="divide-y divide-border">
                   {data.topProducts.map((p, i) => (
-                    <div key={p.product} className="flex items-center gap-4 px-6 py-3.5">
-                      <span className="text-xs font-medium text-muted-foreground w-5 shrink-0">
+                    <div key={p.product} className="flex items-center gap-4 px-6 py-3.5 transition-colors hover:bg-accent/40">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-primary tabular-nums">
                         {i + 1}
                       </span>
                       <div className="flex-1 min-w-0 space-y-1.5">
                         <p className="text-sm font-medium truncate">{p.product}</p>
                         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-chart-1 transition-all duration-500"
+                            className="h-full rounded-full bg-primary transition-all duration-500"
                             style={{ width: `${p.percentage}%` }}
                           />
                         </div>
@@ -429,14 +433,14 @@ export default function CustomerDetailPage({
                 return (
                   <div
                     key={alert.id}
-                    className="flex items-start justify-between gap-4 rounded-xl border border-border bg-background px-5 py-4"
+                    className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-all hover:shadow-md"
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-xs font-normal">
+                        <Badge variant="outline" className="text-xs font-normal rounded-full">
                           {ALERT_TYPE_LABELS[alert.type]}
                         </Badge>
-                        <Badge className={cn('text-xs font-medium border-0', conf.className)}>
+                        <Badge className={cn('text-xs font-medium border-0 rounded-full', conf.className)}>
                           {conf.label}
                         </Badge>
                       </div>
@@ -445,7 +449,7 @@ export default function CustomerDetailPage({
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-serif text-base text-primary tabular-nums">
+                      <p className="text-base font-semibold text-primary tabular-nums">
                         {formatCurrency(alert.expectedValue)}
                       </p>
                       <p className="text-xs text-muted-foreground">potencial</p>
@@ -466,13 +470,13 @@ export default function CustomerDetailPage({
             <DialogDescription>Edite se necessário antes de copiar.</DialogDescription>
           </DialogHeader>
           {msg.loading ? (
-            <div className="space-y-2 py-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /><Skeleton className="h-4 w-4/6" /></div>
+            <div className="space-y-2 py-4"><Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" /></div>
           ) : (
             <Textarea className="min-h-[160px] resize-none text-sm" value={msg.text} onChange={(e) => setMsg((m) => ({ ...m, text: e.target.value }))} />
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsg((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text)}>Copiar</Button>
+            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

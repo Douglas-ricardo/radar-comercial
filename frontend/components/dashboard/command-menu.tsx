@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth/auth-context'
 import {
   CommandDialog,
   CommandInput,
@@ -15,19 +16,28 @@ import {
   CreditCard, Settings, History, Search,
 } from 'lucide-react'
 
-const ACTIONS = [
+type Role = 'admin' | 'analyst' | 'viewer'
+
+type MenuEntry = {
+  label: string
+  href: string
+  icon: typeof Upload
+  roles?: Role[]
+}
+
+const ACTIONS: MenuEntry[] = [
   { label: 'Importar dados de vendas', href: '/dashboard/upload', icon: Upload },
-  { label: 'Disparar para clientes inativos', href: '/dashboard/disparo', icon: Send },
+  { label: 'Disparar para clientes inativos', href: '/dashboard/disparo', icon: Send, roles: ['admin', 'analyst'] },
 ]
 
-const GOTO = [
+const GOTO: MenuEntry[] = [
   { label: 'Visão geral', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Carteira ativa', href: '/dashboard/carteira', icon: Briefcase },
-  { label: 'Disparo', href: '/dashboard/disparo', icon: Send },
+  { label: 'Disparo', href: '/dashboard/disparo', icon: Send, roles: ['admin', 'analyst'] },
   { label: 'Insights', href: '/dashboard/insights', icon: LineChart },
-  { label: 'Equipe', href: '/dashboard/team', icon: Users },
-  { label: 'Integrações', href: '/dashboard/integrations', icon: Plug2 },
-  { label: 'Faturamento', href: '/dashboard/billing', icon: CreditCard },
+  { label: 'Equipe', href: '/dashboard/team', icon: Users, roles: ['admin'] },
+  { label: 'Integrações', href: '/dashboard/integrations', icon: Plug2, roles: ['admin'] },
+  { label: 'Faturamento', href: '/dashboard/billing', icon: CreditCard, roles: ['admin'] },
   { label: 'Configurações', href: '/dashboard/settings', icon: Settings },
   { label: 'Histórico de análises', href: '/dashboard/history', icon: History },
 ]
@@ -38,6 +48,11 @@ const OPEN_EVENT = 'open-command-menu'
 export function CommandMenu() {
   const [open, setOpen] = useState(false)
   const router = useRouter()
+  const { user } = useAuth()
+  const userRole = (user?.role ?? 'viewer') as Role
+  const canSee = (entry: MenuEntry) => !entry.roles || entry.roles.includes(userRole)
+  const actions = ACTIONS.filter(canSee)
+  const goto = GOTO.filter(canSee)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,7 +81,7 @@ export function CommandMenu() {
       <CommandList>
         <CommandEmpty>Nada encontrado.</CommandEmpty>
         <CommandGroup heading="Ações">
-          {ACTIONS.map((a) => (
+          {actions.map((a) => (
             <CommandItem key={a.label} value={a.label} onSelect={() => go(a.href)}>
               <a.icon className="mr-2 h-4 w-4 text-muted-foreground" />
               {a.label}
@@ -74,7 +89,7 @@ export function CommandMenu() {
           ))}
         </CommandGroup>
         <CommandGroup heading="Ir para">
-          {GOTO.map((g) => (
+          {goto.map((g) => (
             <CommandItem key={g.href} value={g.label} onSelect={() => go(g.href)}>
               <g.icon className="mr-2 h-4 w-4 text-muted-foreground" />
               {g.label}

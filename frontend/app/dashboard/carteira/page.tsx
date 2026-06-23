@@ -21,7 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Briefcase, Medal, DollarSign, ArrowRight } from 'lucide-react'
 import { api, opportunitiesApi } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { CarteiraOpportunity, OpportunityStatus, RankingEntry } from '@/types'
@@ -31,10 +31,6 @@ const STATUS_LABELS: Record<OpportunityStatus, string> = {
   contacted: 'Contatado',
   won: 'Ganho',
   lost: 'Perdido',
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 }
 
 const COLUMNS: { status: OpportunityStatus; label: string; dot: string }[] = [
@@ -48,7 +44,7 @@ function FunnelStage({ label, value, tone }: { label: string; value: number; ton
   return (
     <div>
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn('font-mono text-sm tabular-nums', tone ?? 'text-foreground')}>{formatCurrency(value)}</p>
+      <p className={cn('mt-0.5 text-sm font-semibold tabular-nums', tone ?? 'text-foreground')}>{formatCurrency(value)}</p>
     </div>
   )
 }
@@ -101,7 +97,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
     <Dialog open={!!opp} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{opp?.customer}</DialogTitle>
+          <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">{opp?.customer}</DialogTitle>
           <DialogDescription>
             Valor esperado: {opp ? formatCurrency(opp.expectedValue) : '—'}
             {opp?.daysInactive ? ` · ${opp.daysInactive} dias sem comprar` : ''}
@@ -144,7 +140,8 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
 }
 
 export default function CarteiraPage() {
-  const { company } = useAuth()
+  const { company, user } = useAuth()
+  const canUseAI = user?.role === 'admin' || user?.role === 'analyst'
   const [opportunities, setOpportunities] = useState<CarteiraOpportunity[]>([])
   const [ranking, setRanking] = useState<RankingEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -201,7 +198,7 @@ export default function CarteiraPage() {
         title="Carteira Ativa"
         description="Gerencie o status comercial das oportunidades identificadas"
       />
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6">
 
         <Tabs defaultValue="oportunidades">
           <TabsList>
@@ -219,31 +216,50 @@ export default function CarteiraPage() {
           <TabsContent value="oportunidades" className="space-y-5 mt-4">
             {/* Funil + ROI */}
             {!isLoading && opportunities.length > 0 && (
-              <Card>
-                <CardContent className="flex flex-wrap items-center justify-between gap-6 py-4">
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-wrap items-center justify-between gap-6 py-5">
                   <div className="flex items-center gap-3">
                     <FunnelStage label="Identificado" value={identified} />
                     <ArrowRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
-                    <FunnelStage label="Contatado" value={contactedVal} />
+                    <FunnelStage label="Contatado" value={contactedVal} tone="text-primary" />
                     <ArrowRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     <FunnelStage label="Ganho" value={wonVal} tone="text-success" />
                   </div>
                   <div className="text-right">
                     <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">ROI da carteira</p>
-                    <p className="font-serif text-3xl leading-none text-primary tabular-nums">{roi}%</p>
+                    <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{roi}%</p>
                   </div>
                 </CardContent>
               </Card>
             )}
 
             {isLoading ? (
-              <div className="flex items-center justify-center py-16"><Spinner className="h-8 w-8" /></div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {COLUMNS.map((col) => (
+                  <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
+                    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <span className={cn('h-2 w-2 rounded-full', col.dot)} aria-hidden />
+                        {col.label}
+                      </span>
+                    </div>
+                    <div className="flex-1 space-y-2 p-2">
+                      <div className="h-16 rounded-xl bg-muted animate-pulse" />
+                      <div className="h-16 rounded-xl bg-muted animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : opportunities.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Briefcase className="h-12 w-12 mb-4 opacity-25" />
-                  <p className="text-sm font-medium">Nenhuma oportunidade</p>
-                  <p className="text-xs mt-1">Processe uma base de vendas para gerar oportunidades.</p>
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                    <Briefcase className="h-7 w-7" />
+                  </div>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Nenhuma oportunidade ainda</p>
+                  <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                    Processe uma base de vendas para identificar clientes que pararam de comprar e gerar oportunidades de recuperação.
+                  </p>
                 </CardContent>
               </Card>
             ) : (
@@ -251,18 +267,18 @@ export default function CarteiraPage() {
                 {COLUMNS.map((col) => {
                   const items = byStatus[col.status]
                   return (
-                    <div key={col.status} className="flex flex-col rounded-xl border border-border bg-secondary/30">
+                    <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
                       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
                         <span className="flex items-center gap-2 text-sm font-medium">
                           <span className={cn('h-2 w-2 rounded-full', col.dot)} aria-hidden />
                           {col.label}
                           <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
                         </span>
-                        <span className="font-mono text-xs tabular-nums text-muted-foreground">{formatCurrency(sumVal(items))}</span>
+                        <span className="text-xs font-semibold tabular-nums text-muted-foreground">{formatCurrency(sumVal(items))}</span>
                       </div>
                       <div className="flex-1 space-y-2 p-2">
                         {items.length === 0 ? (
-                          <p className="py-10 text-center text-xs text-muted-foreground">—</p>
+                          <p className="py-10 text-center text-xs text-muted-foreground">Nada por aqui</p>
                         ) : (
                           items.map((opp) => (
                             <OpportunityCard
@@ -275,7 +291,7 @@ export default function CarteiraPage() {
                               frequency={opp.frequency}
                               confidence={opp.confidence}
                               onOpen={() => setSelectedOpp(opp)}
-                              onGenerateMessage={() => handleGenerateMessage(opp)}
+                              onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
                             />
                           ))
                         )}
@@ -290,36 +306,44 @@ export default function CarteiraPage() {
           {/* Tab Ranking */}
           <TabsContent value="ranking" className="space-y-4 mt-4">
             {ranking.length > 0 && (
-              <Card>
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
                 <CardHeader className="pb-2">
-                  <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em] flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                     <DollarSign className="h-4 w-4 text-success" />
                     Total convertido
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="font-serif text-3xl leading-none text-success tabular-nums">{formatCurrency(totalWon)}</p>
+                  <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-success tabular-nums">{formatCurrency(totalWon)}</p>
                 </CardContent>
               </Card>
             )}
 
             {isLoading ? (
-              <div className="flex justify-center py-10"><Spinner className="h-6 w-6" /></div>
+              <div className="space-y-3">
+                <div className="h-32 rounded-2xl bg-muted animate-pulse" />
+                <div className="h-32 rounded-2xl bg-muted animate-pulse" />
+              </div>
             ) : ranking.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <Medal className="h-10 w-10 mb-3 opacity-25" />
-                  <p className="text-sm">Nenhuma ação registrada ainda.</p>
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                    <Medal className="h-7 w-7" />
+                  </div>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Ranking ainda vazio</p>
+                  <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                    Registre o status comercial das oportunidades para ver a conversão por vendedor.
+                  </p>
                 </CardContent>
               </Card>
             ) : (
               <div className="space-y-3">
                 {ranking.map((entry, idx) => (
-                  <Card key={entry.userId}>
+                  <Card key={entry.userId} className="rounded-2xl border border-border bg-card shadow-sm">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3">
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold tabular-nums
+                          <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold tabular-nums
                             ${idx === 0 ? 'bg-warning/15 text-warning' :
                               idx === 1 ? 'bg-secondary text-foreground' :
                               'bg-muted text-muted-foreground'}`}
@@ -327,14 +351,14 @@ export default function CarteiraPage() {
                             {idx + 1}
                           </div>
                           <div>
-                            <p className="font-medium text-sm">{entry.userName}</p>
+                            <p className="text-sm font-semibold text-foreground">{entry.userName}</p>
                             <p className="text-xs text-muted-foreground tabular-nums">
                               {entry.conversionRate}% de conversão
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-serif text-lg leading-none text-success tabular-nums">
+                          <p className="font-[family-name:var(--font-display)] text-xl font-bold leading-none tracking-[-0.02em] text-success tabular-nums">
                             {formatCurrency(entry.totalWonValue)}
                           </p>
                           <p className="text-xs text-muted-foreground tabular-nums mt-1">{entry.won} ganhos</p>
@@ -349,8 +373,8 @@ export default function CarteiraPage() {
                             ['Perdido', entry.lost, 'text-destructive'],
                           ] as const
                         ).map(([label, count, color]) => (
-                          <div key={label} className="rounded-lg border border-border bg-secondary/40 py-2">
-                            <p className={`font-serif text-xl tabular-nums ${color}`}>{count}</p>
+                          <div key={label} className="rounded-xl border border-border bg-secondary/40 py-2">
+                            <p className={`font-[family-name:var(--font-display)] text-xl font-bold tabular-nums ${color}`}>{count}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
                           </div>
                         ))}
@@ -375,7 +399,7 @@ export default function CarteiraPage() {
       <Dialog open={msgModal.open} onOpenChange={(open) => setMsgModal(m => ({ ...m, open }))}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Mensagem para WhatsApp</DialogTitle>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Mensagem para WhatsApp</DialogTitle>
             <DialogDescription>Edite se necessário antes de copiar.</DialogDescription>
           </DialogHeader>
           {msgModal.loading ? (

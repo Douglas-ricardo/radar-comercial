@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { Sparkles, TrendingUp, Inbox, Clock } from 'lucide-react'
 
+import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth/auth-context'
 import { api, opportunitiesApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -67,6 +68,8 @@ export default function DashboardPage() {
           setTotalActions(all.length)
         }
         if (recRes.success && recRes.data) setRecovery(recRes.data)
+      } catch {
+        toast.error('Não foi possível carregar o painel. Tente novamente.')
       } finally {
         setIsLoading(false)
       }
@@ -101,10 +104,10 @@ export default function DashboardPage() {
         description="Seu painel de trabalho do dia"
       />
 
-      <div className="flex-1 space-y-6 p-6 md:p-8 max-w-[1400px] mx-auto w-full">
+      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
         {/* 1 · HERO + 2 · fila "quem contatar hoje" */}
         <div className="grid gap-6 lg:grid-cols-3">
-          <Card className="flex flex-col justify-between border-primary/20 bg-primary/[0.03]">
+          <Card className="flex flex-col justify-between rounded-2xl border-primary/20 bg-accent/40 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Para recuperar agora
@@ -112,10 +115,10 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {isLoading ? (
-                <Skeleton className="h-12 w-44" />
+                <Skeleton className="h-12 w-44 bg-muted" />
               ) : (
                 <>
-                  <p className="font-serif text-5xl leading-none text-primary tabular-nums">
+                  <p className="font-[family-name:var(--font-display)] text-5xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">
                     {formatCurrency(recoverableNow)}
                   </p>
                   <p className="text-sm text-muted-foreground">
@@ -123,7 +126,7 @@ export default function DashboardPage() {
                     clientes na fila para contatar
                   </p>
                   {recovery && recovery.totalRecovered > 0 && (
-                    <div className="flex items-center gap-1.5 text-sm text-success">
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-success">
                       <TrendingUp className="h-4 w-4" aria-hidden />
                       {formatCurrency(recovery.totalRecovered)} recuperado no período
                     </div>
@@ -133,24 +136,24 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex flex-col lg:col-span-2">
+          <Card className="flex flex-col rounded-2xl shadow-sm lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Quem contatar hoje</CardTitle>
+                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Quem contatar hoje</CardTitle>
                 <CardDescription>Priorizado por valor recuperável</CardDescription>
               </div>
               <Link href="/dashboard/carteira">
-                <Button variant="ghost" size="sm" className="text-primary hover:text-primary/80">Ver carteira</Button>
+                <Button variant="ghost" size="sm" className="text-primary hover:bg-accent hover:text-primary">Ver carteira</Button>
               </Link>
             </CardHeader>
             <CardContent className="flex-1">
               {isLoading ? (
                 <div className="space-y-2">
-                  {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
+                  {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-14 w-full rounded-xl bg-muted" />)}
                 </div>
               ) : queue.length === 0 ? (
-                <Empty className="py-8">
-                  <EmptyMedia variant="icon"><Inbox /></EmptyMedia>
+                <Empty className="py-10">
+                  <EmptyMedia variant="icon" className="bg-accent text-primary"><Inbox /></EmptyMedia>
                   <EmptyTitle>Fila vazia</EmptyTitle>
                   <EmptyDescription>Importe uma base de vendas para o Radar mapear quem contatar.</EmptyDescription>
                 </Empty>
@@ -161,7 +164,7 @@ export default function DashboardPage() {
                     return (
                       <div
                         key={opp.id}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/40"
+                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:border-primary/30 hover:shadow-sm"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{opp.customer}</p>
@@ -173,18 +176,20 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex shrink-0 items-center gap-4">
                           <div className="text-right">
-                            <p className="font-mono text-sm tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</p>
+                            <p className="text-sm font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</p>
                             <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium', conf.tone)}>
                               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> {conf.label}
                             </span>
                           </div>
-                          <Button
-                            size="sm" variant="ghost"
-                            className="h-7 gap-1.5 text-xs text-primary hover:bg-primary/5"
-                            onClick={() => generateMessage(opp)}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" /> Gerar
-                          </Button>
+                          {(user?.role === 'admin' || user?.role === 'analyst') && (
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-7 gap-1.5 text-xs text-primary hover:bg-accent hover:text-primary"
+                              onClick={() => generateMessage(opp)}
+                            >
+                              <Sparkles className="h-3.5 w-3.5" /> Gerar
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )
@@ -195,29 +200,29 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* 3 · KPIs de apoio (Geist Mono tabular, não serifa) */}
+        {/* 3 · KPIs de apoio */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {kpis.map((k) => (
-            <Card key={k.label}>
+            <Card key={k.label} className="rounded-2xl shadow-sm">
               <CardHeader className="pb-1">
                 <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{k.label}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className={cn('font-mono text-2xl tabular-nums', k.tone)}>{isLoading ? '—' : k.value}</p>
+                <p className={cn('font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.02em] tabular-nums', k.tone)}>{isLoading ? '—' : k.value}</p>
               </CardContent>
             </Card>
           ))}
         </div>
 
         {/* 4 · Tendência (apoio) */}
-        <Card>
+        <Card className="rounded-2xl shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Tendência</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Tendência</CardTitle>
             <CardDescription>Receita capturada versus perdida (6 meses)</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <Skeleton className="h-[240px] w-full rounded-lg" />
+              <Skeleton className="h-[240px] w-full rounded-xl bg-muted" />
             ) : (
               <ChartContainer config={chartConfig} className="h-[240px] w-full">
                 <AreaChart data={insights?.charts?.timeSeries || []} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -247,14 +252,14 @@ export default function DashboardPage() {
           </DialogHeader>
           {msg.loading ? (
             <div className="space-y-2 py-4">
-              <Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /><Skeleton className="h-4 w-4/6" />
+              <Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" />
             </div>
           ) : (
             <Textarea className="min-h-[160px] resize-none text-sm" value={msg.text} onChange={(e) => setMsg((m) => ({ ...m, text: e.target.value }))} />
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsg((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text)}>Copiar</Button>
+            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

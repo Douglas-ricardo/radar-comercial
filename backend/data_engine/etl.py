@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 
 import polars as pl
 
+from ml.inference import assess_churn_risk  # modelo treinado se existir; senão heurística (ml/churn.py)
+
 logger = logging.getLogger(__name__)
 
 # ─── Column normalisation ─────────────────────────────────────────────────────
@@ -20,6 +22,10 @@ CANONICAL_COLUMNS = {
     "servico": "product_id", "product_id": "product_id",
     "quantidade": "qty", "qty": "qty", "qtd": "qty", "quant": "qty",
     "valor": "revenue", "revenue": "revenue", "preco": "revenue", "total": "revenue",
+    # Contato do cliente final (opcional) — habilita disparo WhatsApp/email
+    "telefone": "phone", "celular": "phone", "whatsapp": "phone", "fone": "phone",
+    "phone": "phone", "contato": "phone",
+    "email": "email", "e-mail": "email", "e_mail": "email", "mail": "email",
 }
 
 DATE_RANGES = ("1m", "3m", "6m", "12m")
@@ -67,16 +73,30 @@ _DATE_FORMATS = ["%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
 def _parse_dates_multi_format(df: pl.DataFrame) -> pl.DataFrame:
     """
     Tenta cada formato em _DATE_FORMATS e fica com o que produziu menos nulls.
-    Resolve casos em que planilhas vêm em ISO, formato US ou BR sem aviso prévio.
+    Em empate, vence o primeiro da lista (BR `%d/%m/%Y`) — coerente com o público.
+    Quando BR e US (`%m/%d/%Y`) empatam, há ambiguidade real (ex.: "05/03/2024"):
+    mantemos o BR mas registramos aviso, pois algumas datas podem estar trocadas.
     """
     best_series = None
     best_nulls = None
+    nulls_by_fmt = {}
     for fmt in _DATE_FORMATS:
         parsed = df["date"].str.to_date(fmt, strict=False)
         nulls = parsed.null_count()
+        nulls_by_fmt[fmt] = nulls
         if best_nulls is None or nulls < best_nulls:
             best_series = parsed
             best_nulls = nulls
+
+    # Ambiguidade BR×US: ambos parseiam o mesmo nº de linhas → datas com dia<=12
+    # podem ter sido interpretadas como mês. Avisa (não bloqueia).
+    if nulls_by_fmt.get("%d/%m/%Y") == nulls_by_fmt.get("%m/%d/%Y") and best_nulls is not None:
+        total = df.height
+        if best_nulls < total:  # houve parsing efetivo
+            logger.warning(
+                "etl.dates.ambiguous_format",
+                extra={"chosen": "%d/%m/%Y", "note": "BR e US empataram; assumindo dd/mm"},
+            )
     return df.with_columns(best_series.alias("date"))
 
 
@@ -97,12 +117,101 @@ def _cast_types(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
+def prettify_customer_name(name: str) -> str:
+    """
+    Nome para exibição: preserva acentos e capitalização original. Apenas
+    normaliza espaços e corrige caixa quando o nome vem todo em maiúsculas ou
+    todo em minúsculas (ex.: "JOÃO DA SILVA" / "joão da silva" → "João Da Silva").
+    Casos mistos (ex.: "iFood", "McDonald's") são preservados como vieram.
+    """
+    if not name:
+        return ""
+    s = " ".join(str(name).split())
+    if s and (s == s.upper() or s == s.lower()):
+        return s.title()
+    return s
+
+
 def _normalize_customer_names(df: pl.DataFrame) -> pl.DataFrame:
+    # Mantém o nome original (prettificado) para exibição em `customer_display`
+    # e a versão normalizada em `customer_id` para agrupamento/hash.
     return df.with_columns(
+        pl.col("customer_id")
+        .map_elements(prettify_customer_name, return_dtype=pl.Utf8)
+        .fill_null("")
+        .alias("customer_display")
+    ).with_columns(
         pl.col("customer_id")
         .map_elements(normalize_customer_name, return_dtype=pl.Utf8)
         .fill_null("")
     )
+
+
+def _build_display_map(df: pl.DataFrame) -> dict:
+    """Mapa normalizado→nome de exibição. Se faltar a coluna, retorna vazio."""
+    if "customer_display" not in df.columns:
+        return {}
+    return dict(zip(df["customer_id"].to_list(), df["customer_display"].to_list()))
+
+
+def normalize_phone_br(raw) -> str | None:
+    """
+    Normaliza telefone para E.164 brasileiro (+55DDNNNNNNNNN), best-effort.
+    Aceita "(11) 98238-7185", "11982387185", "5511982387185", "+55 11 98238-7185".
+    Retorna None se não houver dígitos suficientes para ser um número válido.
+    """
+    if raw is None:
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if not digits:
+        return None
+    # já vem com DDI 55
+    if digits.startswith("55") and len(digits) in (12, 13):
+        return f"+{digits}"
+    # número nacional com DDD (10 = fixo, 11 = celular)
+    if len(digits) in (10, 11):
+        return f"+55{digits}"
+    # internacional fora do BR — só aceita dentro do tamanho válido de E.164 (8–15)
+    if 11 <= len(digits) <= 15:
+        return f"+{digits}"
+    # qualquer outra coisa (muito curto/longo) é inválido → não envia
+    return None
+
+
+def _clean_email(raw) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    return s if "@" in s and "." in s.split("@")[-1] else None
+
+
+def _build_contact_map(df: pl.DataFrame) -> dict:
+    """
+    Mapa customer_id(normalizado) → {phone, email} usando o registro mais recente
+    com contato preenchido. Telefone normalizado para E.164. Vazio se sem colunas.
+    """
+    has_phone = "phone" in df.columns
+    has_email = "email" in df.columns
+    if not has_phone and not has_email:
+        return {}
+
+    cols = ["customer_id", "date"]
+    if has_phone:
+        cols.append("phone")
+    if has_email:
+        cols.append("email")
+
+    # ordena por data desc para o primeiro não-nulo por cliente ser o mais recente
+    sub = df.select(cols).sort("date", descending=True)
+    contacts: dict = {}
+    for row in sub.iter_rows(named=True):
+        cid = row["customer_id"]
+        entry = contacts.setdefault(cid, {"phone": None, "email": None})
+        if has_phone and entry["phone"] is None:
+            entry["phone"] = normalize_phone_br(row.get("phone"))
+        if has_email and entry["email"] is None:
+            entry["email"] = _clean_email(row.get("email"))
+    return contacts
 
 
 def _clean_numerics(df: pl.DataFrame) -> pl.DataFrame:
@@ -158,7 +267,15 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
     if df.is_empty():
         return None
 
-    max_date = _max_date(df)
+    display_map = _build_display_map(df)
+    file_max = _max_date(df)
+    today = datetime.now().date()
+    # Guard: se o arquivo está defasado (>7 dias), medir churn contra o próprio arquivo
+    # para evitar que todo cliente vire "inativo" quando o CSV é histórico.
+    reference_date = today if (today - file_max).days <= 7 else file_max
+    data_freshness = "live" if reference_date == today else file_max.strftime("até %d/%m/%Y")
+
+    max_date = file_max  # mantido para cálculo das janelas de período
     target_days = _DAYS_MAP.get(date_range, 180)
 
     start_date = max_date - timedelta(days=target_days)
@@ -184,17 +301,29 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
     unique_customers = int(df_current["customer_id"].n_unique())
     unique_products = int(df_current["product_id"].n_unique())
 
-    # Churned: clientes que não compram há mais de 60 dias (relativo ao max_date do dataset).
+    # Churned: clientes que não compram há mais de 60 dias relativo a reference_date.
+    # reference_date = hoje se o arquivo é recente (≤7d), senão = max_date do arquivo.
     # Usa o df completo para detectar todos os clientes inativos — não só os do período atual.
-    # Para a janela curta (1m), df_current abrange apenas 30 dias e nunca conteria clientes
-    # com última compra > 60 dias atrás, o que tornaria a lista de oportunidades vazia.
-    limit_active = max_date - timedelta(days=60)
+    limit_active = reference_date - timedelta(days=60)
+
+    # Enriquecimento por cliente: último produto, n_purchases, avg_ticket, avg_interval
+    last_product_df = (
+        df.sort("date", descending=True)
+        .group_by("customer_id")
+        .first()
+        .select(["customer_id", pl.col("product_id").alias("last_product")])
+    )
+    customer_agg = df.group_by("customer_id").agg([
+        pl.col("date").max().alias("ultima_compra"),
+        pl.col("date").min().alias("primeira_compra"),
+        pl.col("revenue").sum().alias("valor_total"),
+        pl.col("revenue").count().alias("n_purchases"),
+        pl.col("revenue").mean().alias("avg_ticket"),
+    ])
     churned_df = (
-        df.group_by("customer_id").agg([
-            pl.col("date").max().alias("ultima_compra"),
-            pl.col("revenue").sum().alias("valor_total"),
-        ])
+        customer_agg
         .filter(pl.col("ultima_compra") < pl.lit(limit_active).cast(pl.Date))
+        .join(last_product_df, on="customer_id", how="left")
     )
 
     # KPI lost_revenue: receita dos clientes churned dentro do período atual
@@ -227,7 +356,7 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
         safe_id = hashlib.md5(norm.encode("utf-8")).hexdigest()
         customer_distribution.append({
             "id": safe_id,
-            "name": row["customer_id"],
+            "name": display_map.get(row["customer_id"], row["customer_id"]),
             "value": float(row["curr"]),
             "percentage": round((row["curr"] / total_revenue) * 100, 1) if total_revenue > 0 else 0,
             "trend": _trend(float(row["curr"]), float(row["prev"])),
@@ -255,19 +384,36 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
     ]
 
     # ── Opportunities ─────────────────────────────────────────────────────────
+    def _frequency_label(n_purchases: int, primeira_compra, ultima_compra) -> str:
+        if n_purchases <= 1 or primeira_compra is None or ultima_compra is None:
+            return "Esporádico"
+        span = (ultima_compra - primeira_compra).days
+        avg_days = span / (n_purchases - 1) if n_purchases > 1 else span
+        if avg_days < 14:
+            return "Semanal"
+        if avg_days < 21:
+            return "Quinzenal"
+        if avg_days < 45:
+            return "Mensal"
+        if avg_days < 75:
+            return "Bimestral"
+        return "Esporádico"
+
     opportunities = [
         {
             "id": str(uuid.uuid4()),
             "customerHash": hashlib.md5(
                 normalize_customer_name(str(row["customer_id"])).encode("utf-8")
             ).hexdigest(),
-            "customer": row["customer_id"],
-            "product": "Mix de Produtos",
+            "customer": display_map.get(row["customer_id"], row["customer_id"]),
+            "product": str(row["last_product"]) if row.get("last_product") else "Produto não identificado",
             "type": "declining_customer",
             "lastPurchase": row["ultima_compra"].isoformat() if row["ultima_compra"] else None,
-            "daysInactive": (max_date - row["ultima_compra"]).days if row["ultima_compra"] else 0,
-            "frequency": "Mensal",
-            "expectedValue": float(row["valor_total"] / 2),
+            "daysInactive": (reference_date - row["ultima_compra"]).days if row["ultima_compra"] else 0,
+            "frequency": _frequency_label(
+                row.get("n_purchases", 1), row.get("primeira_compra"), row["ultima_compra"]
+            ),
+            "expectedValue": round(float(row.get("avg_ticket", 0) or 0), 2),
             "confidence": "high" if row["valor_total"] > 1000 else "medium",
         }
         for row in churned_df.sort("valor_total", descending=True).head(15).iter_rows(named=True)
@@ -313,6 +459,7 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
             "revenueGrowth": revenue_growth,
             "uniqueCustomers": unique_customers,
             "uniqueProducts": unique_products,
+            "dataFreshness": data_freshness,
         },
         "opportunities": opportunities,
         "charts": {
@@ -334,6 +481,8 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
     if df.is_empty():
         return []
 
+    display_map = _build_display_map(df)
+    contact_map = _build_contact_map(df)
     max_date = _max_date(df)
     total_company_revenue = float(df["revenue"].sum() or 0.0)
 
@@ -341,6 +490,7 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
     customer_agg = df.group_by("customer_id").agg([
         pl.col("revenue").sum().alias("total_revenue"),
         pl.col("date").max().alias("last_purchase_date"),
+        pl.col("date").min().alias("first_purchase_date"),
         pl.col("date").n_unique().alias("frequency"),
     ])
 
@@ -376,9 +526,15 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
 
         total_rev = float(row["total_revenue"] or 0.0)
         last_date = row["last_purchase_date"]
+        first_date = row["first_purchase_date"]
         recency_days = (max_date - last_date).days if last_date else 0
         frequency = int(row["frequency"] or 1)
         percentage = round((total_rev / total_company_revenue) * 100, 1) if total_company_revenue > 0 else 0.0
+
+        # Intervalo médio entre compras (cadência do cliente) → churn preditivo
+        span_days = (last_date - first_date).days if (last_date and first_date) else 0
+        avg_interval_days = round(span_days / (frequency - 1), 1) if frequency > 1 and span_days > 0 else 0.0
+        churn = assess_churn_risk(recency_days, avg_interval_days, frequency)
 
         r_score = 5 if recency_days <= 30 else 4 if recency_days <= 60 else 3 if recency_days <= 90 else 2 if recency_days <= 180 else 1
         f_score = 5 if frequency >= 10 else 4 if frequency >= 5 else 3 if frequency >= 3 else 2 if frequency >= 2 else 1
@@ -448,13 +604,19 @@ def build_customer_profiles(df: pl.DataFrame) -> list[dict]:
                 "confidence": "medium",
             })
 
+        contact = contact_map.get(cust_name, {})
         profiles.append({
             "customer_hash": customer_hash,
-            "customer_name": cust_name,
+            "customer_name": display_map.get(cust_name, cust_name),
+            "phone": contact.get("phone"),
+            "email": contact.get("email"),
             "total_revenue": total_rev,
             "percentage": percentage,
             "last_purchase_date": last_date.isoformat() if last_date else None,
             "recency_days": recency_days,
+            "avg_interval_days": avg_interval_days,
+            "churn_risk": churn["risk"],
+            "churn_score": churn["score"],
             "trend": trend,
             "segment": segment,
             "rfv": {

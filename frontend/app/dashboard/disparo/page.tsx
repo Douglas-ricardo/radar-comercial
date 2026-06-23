@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { DashboardHeader } from '@/components/dashboard/header'
+import { ProtectedRoute } from '@/lib/auth/protected-route'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -28,7 +29,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   champion: 'Campeão', loyal: 'Fiel', at_risk: 'Em risco', lost: 'Perdido', new: 'Novo',
 }
 
-export default function DisparoPage() {
+function DisparoPageContent() {
   const [config, setConfig] = useState<OutreachConfig | null>(null)
   const [contacts, setContacts] = useState<OutreachContact[]>([])
   const [recovery, setRecovery] = useState<RecoverySummary | null>(null)
@@ -61,17 +62,22 @@ export default function DisparoPage() {
       api.outreach.getRecovery(),
     ]
     if (company?.id) reqs.push(api.insights.getChurnRisk(company.id))
-    const [cfgRes, contactsRes, recoveryRes, churnRes] = await Promise.all(reqs) as [
-      Awaited<ReturnType<typeof api.outreach.getConfig>>,
-      Awaited<ReturnType<typeof api.outreach.listContacts>>,
-      Awaited<ReturnType<typeof api.outreach.getRecovery>>,
-      Awaited<ReturnType<typeof api.insights.getChurnRisk>> | undefined,
-    ]
-    if (cfgRes.success && cfgRes.data) setConfig(cfgRes.data)
-    if (contactsRes.success && contactsRes.data) setContacts(contactsRes.data)
-    if (recoveryRes.success && recoveryRes.data) setRecovery(recoveryRes.data)
-    if (churnRes?.success && churnRes.data) setChurn(churnRes.data)
-    setLoading(false)
+    try {
+      const [cfgRes, contactsRes, recoveryRes, churnRes] = await Promise.all(reqs) as [
+        Awaited<ReturnType<typeof api.outreach.getConfig>>,
+        Awaited<ReturnType<typeof api.outreach.listContacts>>,
+        Awaited<ReturnType<typeof api.outreach.getRecovery>>,
+        Awaited<ReturnType<typeof api.insights.getChurnRisk>> | undefined,
+      ]
+      if (cfgRes.success && cfgRes.data) setConfig(cfgRes.data)
+      if (contactsRes.success && contactsRes.data) setContacts(contactsRes.data)
+      if (recoveryRes.success && recoveryRes.data) setRecovery(recoveryRes.data)
+      if (churnRes?.success && churnRes.data) setChurn(churnRes.data)
+    } catch {
+      toast.error('Não foi possível carregar a página de disparo.')
+    } finally {
+      setLoading(false)
+    }
   }, [company?.id])
 
   useEffect(() => { load() }, [load])
@@ -97,7 +103,8 @@ export default function DisparoPage() {
       return
     }
     setQrCode(res.data?.qrcode ?? null)
-    // polling do status até conectar
+    // polling do status até conectar — limpa um polling anterior antes de abrir outro
+    if (pollRef.current) clearInterval(pollRef.current)
     pollRef.current = setInterval(async () => {
       const st = await api.outreach.whatsappStatus()
       if (st.success && st.data?.status === 'connected') {
@@ -139,7 +146,14 @@ export default function DisparoPage() {
   async function toggleOptOut(c: OutreachContact) {
     const next = !c.optOut
     setContacts(prev => prev.map(x => x.customerHash === c.customerHash ? { ...x, optOut: next } : x))
-    await api.outreach.updateContact(c.customerHash, { contact_opt_out: next })
+    try {
+      const res = await api.outreach.updateContact(c.customerHash, { contact_opt_out: next })
+      if (!res.success) throw new Error(res.error ?? '')
+    } catch {
+      // reverte o otimismo se o servidor recusar — a UI não pode mentir sobre o opt-out
+      setContacts(prev => prev.map(x => x.customerHash === c.customerHash ? { ...x, optOut: c.optOut } : x))
+      toast.error('Não foi possível atualizar o contato.')
+    }
   }
 
   function openEdit(c: OutreachContact) {
@@ -165,8 +179,13 @@ export default function DisparoPage() {
   if (loading) {
     return (
       <div className="flex flex-col min-h-screen">
-        <DashboardHeader title="Disparo" description="Envio automático para clientes inativos" />
-        <div className="flex-1 flex items-center justify-center"><Spinner /></div>
+        <DashboardHeader title="Disparo automático" description="Envio automático para clientes inativos" />
+        <div className="flex-1 p-6 lg:p-8 space-y-6">
+          <div className="h-24 rounded-2xl bg-muted animate-pulse" />
+          <div className="h-28 rounded-2xl bg-muted animate-pulse" />
+          <div className="h-12 rounded-2xl bg-muted animate-pulse" />
+          <div className="h-72 rounded-2xl bg-muted animate-pulse" />
+        </div>
       </div>
     )
   }
@@ -180,38 +199,40 @@ export default function DisparoPage() {
         title="Disparo automático"
         description="Reative clientes inativos por WhatsApp e e-mail, com mensagens geradas por IA"
       />
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6">
 
         {/* Receita recuperada — loop fechado */}
-        <Card className="border-success/30 bg-success/[0.06]">
-          <CardContent className="flex items-center justify-between py-5">
+        <Card className="rounded-2xl border border-success/30 bg-success/[0.06] shadow-sm">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
             <div className="flex items-center gap-3">
-              <div className="rounded-full bg-success/15 p-2.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-success/15">
                 <TrendingUp className="h-5 w-5 text-success" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Receita recuperada via disparo</p>
-                <p className="font-serif text-3xl text-success tabular-nums">
+                <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-tight tracking-[-0.02em] text-success tabular-nums">
                   {formatCurrency(recovery?.totalRecovered ?? 0)}
                 </p>
               </div>
             </div>
             <div className="text-right text-sm text-muted-foreground">
-              <p><strong className="text-foreground">{recovery?.recoveredCount ?? 0}</strong> clientes reativados</p>
-              <p>{recovery?.pendingCount ?? 0} aguardando retorno</p>
-              <p>{recovery?.repliesCount ?? 0} respostas recebidas</p>
+              <p><strong className="font-semibold text-foreground tabular-nums">{recovery?.recoveredCount ?? 0}</strong> clientes reativados</p>
+              <p className="tabular-nums">{recovery?.pendingCount ?? 0} aguardando retorno</p>
+              <p className="tabular-nums">{recovery?.repliesCount ?? 0} respostas recebidas</p>
             </div>
           </CardContent>
         </Card>
 
         {/* Churn preditivo — clientes prestes a sumir */}
         {churn && churn.total > 0 && (
-          <Card className="border-warning/30 bg-warning/[0.06]">
-            <CardContent className="flex items-center justify-between py-4">
+          <Card className="rounded-2xl border border-warning/30 bg-warning/[0.06] shadow-sm">
+            <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
               <div className="flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-warning shrink-0" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/15 shrink-0">
+                  <AlertTriangle className="h-5 w-5 text-warning" />
+                </div>
                 <div>
-                  <p className="text-sm font-medium">
+                  <p className="text-sm font-semibold text-foreground tabular-nums">
                     {churn.total} cliente(s) prestes a sumir
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -221,13 +242,13 @@ export default function DisparoPage() {
               </div>
               <div className="flex gap-2 text-xs">
                 {churn.counts.high > 0 && (
-                  <Badge className="bg-destructive/10 text-destructive border-0">{churn.counts.high} alto</Badge>
+                  <Badge className="rounded-full border-0 bg-destructive/10 text-destructive tabular-nums">{churn.counts.high} alto</Badge>
                 )}
                 {churn.counts.medium > 0 && (
-                  <Badge className="bg-warning/10 text-warning border-0">{churn.counts.medium} médio</Badge>
+                  <Badge className="rounded-full border-0 bg-warning/10 text-warning tabular-nums">{churn.counts.medium} médio</Badge>
                 )}
                 {churn.counts.low > 0 && (
-                  <Badge className="bg-muted text-muted-foreground border-0">{churn.counts.low} baixo</Badge>
+                  <Badge className="rounded-full border-0 bg-muted text-muted-foreground tabular-nums">{churn.counts.low} baixo</Badge>
                 )}
               </div>
             </CardContent>
@@ -235,16 +256,16 @@ export default function DisparoPage() {
         )}
 
         {/* Disparo de hoje — ação primária */}
-        <Card className="border-primary/20 bg-primary/[0.03]">
+        <Card className="rounded-2xl border border-primary/20 bg-primary/[0.03] shadow-sm">
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
             <div>
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Disparo de hoje</p>
-              <p className="mt-1 font-serif text-3xl leading-none text-primary tabular-nums">{targetCount}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{targetCount}</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 clientes elegíveis (em risco/perdidos, com contato, sem opt-out) ·{' '}
                 {connected
-                  ? <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="h-3.5 w-3.5" /> WhatsApp conectado</span>
-                  : <span className="inline-flex items-center gap-1 text-warning"><AlertTriangle className="h-3.5 w-3.5" /> WhatsApp desconectado</span>}
+                  ? <span className="inline-flex items-center gap-1 font-medium text-success"><CheckCircle2 className="h-3.5 w-3.5" /> WhatsApp conectado</span>
+                  : <span className="inline-flex items-center gap-1 font-medium text-warning"><AlertTriangle className="h-3.5 w-3.5" /> WhatsApp desconectado</span>}
               </p>
             </div>
             <Button size="lg" onClick={handleOpenConfirm} disabled={sending || targetCount === 0}>
@@ -255,17 +276,17 @@ export default function DisparoPage() {
 
         {/* Configuração — secundária, recolhível (aberta se ainda não conectou) */}
         <Collapsible defaultOpen={!connected} className="space-y-6">
-          <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-secondary/50">
+          <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 text-sm font-medium shadow-sm transition-all hover:shadow-md">
             <span className="flex items-center gap-2"><Settings2 className="h-4 w-4 text-muted-foreground" /> Configuração de disparo</span>
             <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-6">
 
         {/* Conexão WhatsApp */}
-        <Card>
+        <Card className="rounded-2xl border border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 font-serif text-lg font-medium tracking-[-0.01em]">
-              <Smartphone className="h-5 w-5" /> WhatsApp do vendedor
+            <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+              <Smartphone className="h-5 w-5 text-primary" /> WhatsApp do vendedor
             </CardTitle>
             <CardDescription>
               Conecte o número do vendedor (o cliente já conhece). As mensagens saem desse número.
@@ -303,9 +324,9 @@ export default function DisparoPage() {
         </Card>
 
         {/* Configuração de canais */}
-        <Card>
+        <Card className="rounded-2xl border border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Canais e regras</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Canais e regras</CardTitle>
             <CardDescription>Defina como e quando os disparos acontecem.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -350,7 +371,7 @@ export default function DisparoPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-4 bg-muted/30">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/30 p-4">
               <div>
                 <Label className="text-base">Disparo automático diário</Label>
                 <p className="text-sm text-muted-foreground">
@@ -361,7 +382,7 @@ export default function DisparoPage() {
                 onCheckedChange={v => patchConfig({ autoSendEnabled: v })} disabled={saving} />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-4 bg-muted/30">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/30 p-4">
               <div>
                 <Label className="text-base">Cadência multi-toque</Label>
                 <p className="text-sm text-muted-foreground">
@@ -379,9 +400,9 @@ export default function DisparoPage() {
         </Collapsible>
 
         {/* Contatos / opt-out */}
-        <Card>
+        <Card className="rounded-2xl border border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Contatos dos clientes</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Contatos dos clientes</CardTitle>
             <CardDescription>
               Complete telefone/e-mail faltantes e exclua quem não deve receber (opt-out).
             </CardDescription>
@@ -403,10 +424,22 @@ export default function DisparoPage() {
                 {contacts.map(c => (
                   <TableRow key={c.customerHash} className={c.optOut ? 'opacity-50' : ''}>
                     <TableCell className="font-medium">{c.customerName}</TableCell>
-                    <TableCell><Badge variant="outline">{SEGMENT_LABELS[c.segment] ?? c.segment}</Badge></TableCell>
-                    <TableCell className={c.phone ? '' : 'text-muted-foreground'}>{c.phone ?? '—'}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={
+                          c.segment === 'lost' ? 'rounded-full border-0 bg-destructive/10 text-destructive'
+                          : c.segment === 'at_risk' ? 'rounded-full border-0 bg-warning/10 text-warning'
+                          : c.segment === 'champion' || c.segment === 'loyal' ? 'rounded-full border-0 bg-success/10 text-success'
+                          : 'rounded-full border-0 bg-muted text-muted-foreground'
+                        }
+                      >
+                        {SEGMENT_LABELS[c.segment] ?? c.segment}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className={c.phone ? 'tabular-nums' : 'text-muted-foreground'}>{c.phone ?? '—'}</TableCell>
                     <TableCell className={c.email ? '' : 'text-muted-foreground'}>{c.email ?? '—'}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatCurrency(c.totalRevenue)}</TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">{formatCurrency(c.totalRevenue)}</TableCell>
                     <TableCell className="text-center">
                       <Switch checked={!c.optOut} onCheckedChange={() => toggleOptOut(c)} />
                     </TableCell>
@@ -418,9 +451,17 @@ export default function DisparoPage() {
                   </TableRow>
                 ))}
                 {contacts.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      Nenhum cliente ainda. Faça upload de uma planilha com vendas.
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={7} className="py-12">
+                      <div className="flex flex-col items-center justify-center text-center">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                          <Smartphone className="h-7 w-7" />
+                        </div>
+                        <p className="mt-4 font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em] text-foreground">Nenhum cliente ainda</p>
+                        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                          Faça upload de uma planilha com vendas para popular os contatos e começar a disparar.
+                        </p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
@@ -431,10 +472,10 @@ export default function DisparoPage() {
       </div>
 
       {/* QR Code modal */}
-      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+      <Dialog open={qrOpen} onOpenChange={(o) => { setQrOpen(o); if (!o && pollRef.current) clearInterval(pollRef.current) }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Conectar WhatsApp</DialogTitle>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Conectar WhatsApp</DialogTitle>
             <DialogDescription>
               Abra o WhatsApp no celular → Aparelhos conectados → Conectar aparelho → escaneie o código.
             </DialogDescription>
@@ -458,7 +499,7 @@ export default function DisparoPage() {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Revisar antes de enviar</DialogTitle>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Revisar antes de enviar</DialogTitle>
             <DialogDescription>
               Esta é a mensagem que será enviada para <strong>{targetCount}</strong> cliente(s) elegível(is).
               Exemplo gerado para um cliente real:
@@ -468,7 +509,7 @@ export default function DisparoPage() {
             {previewLoading && <div className="flex justify-center py-6"><Spinner /></div>}
             {!previewLoading && previewMsg?.message && (
               <>
-                <div className="rounded-lg border bg-muted/40 p-4 text-sm whitespace-pre-wrap">
+                <div className="rounded-xl border border-border bg-muted/40 p-4 text-sm whitespace-pre-wrap">
                   {previewMsg.message}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
@@ -499,7 +540,7 @@ export default function DisparoPage() {
       <Dialog open={!!editContact} onOpenChange={o => !o && setEditContact(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Editar contato — {editContact?.customerName}</DialogTitle>
+            <DialogTitle className="font-[family-name:var(--font-display)] font-bold tracking-[-0.02em]">Editar contato — {editContact?.customerName}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -520,5 +561,13 @@ export default function DisparoPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function DisparoPage() {
+  return (
+    <ProtectedRoute requiredRoles={['admin', 'analyst']}>
+      <DisparoPageContent />
+    </ProtectedRoute>
   )
 }

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { DashboardHeader } from '@/components/dashboard/header'
 import { useAuth } from '@/lib/auth/auth-context'
+import { ProtectedRoute } from '@/lib/auth/protected-route'
 import { api } from '@/lib/api/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -69,21 +70,21 @@ const roleConfig: Record<string, { label: string; description: string; color: st
   admin: {
     label: 'Administrador',
     description: 'Acesso total a todas as funcionalidades',
-    color: 'bg-primary/10 text-primary',
+    color: 'border-transparent bg-primary/10 text-primary',
   },
   analyst: {
     label: 'Analista',
     description: 'Pode fazer uploads e visualizar insights',
-    color: 'bg-chart-2/10 text-chart-2',
+    color: 'border-transparent bg-chart-2/10 text-chart-2',
   },
   viewer: {
     label: 'Visualizador',
     description: 'Apenas visualizacao de dados',
-    color: 'bg-muted text-muted-foreground',
+    color: 'border-transparent bg-muted text-muted-foreground',
   },
 }
 
-export default function TeamPage() {
+function TeamPageContent() {
   const { user, company } = useAuth()
   const router = useRouter()
   
@@ -269,60 +270,68 @@ export default function TeamPage() {
         description="Gerencie os membros da sua equipe e suas permissoes"
       />
 
-      <div className="flex-1 space-y-6 p-6">
+      <div className="flex-1 space-y-6 p-6 lg:p-8">
         {/* Stats */}
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
+          <Card className="rounded-2xl border border-border bg-card shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Total de membros
               </CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
+                <Users className="h-4 w-4 text-primary" aria-hidden="true" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="font-serif text-3xl tabular-nums">
+              <div className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.02em] tabular-nums">
                 {members.filter(m => m.status === 'active').length}
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {members.filter(m => m.status === 'pending').length} convites pendentes
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-2xl border border-border bg-card shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Administradores
               </CardTitle>
-              <Shield className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
+                <Shield className="h-4 w-4 text-primary" aria-hidden="true" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="font-serif text-3xl tabular-nums">
+              <div className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.02em] tabular-nums">
                 {members.filter(m => m.role === 'admin' && m.status === 'active').length}
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">Acesso total à conta</p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-2xl border border-border bg-card shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Analistas
               </CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
+                <Users className="h-4 w-4 text-primary" aria-hidden="true" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="font-serif text-3xl tabular-nums">
+              <div className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.02em] tabular-nums">
                 {members.filter(m => m.role === 'analyst' && m.status === 'active').length}
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">Operam uploads e insights</p>
             </CardContent>
           </Card>
         </div>
 
         {/* Team Members */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="font-serif text-lg font-medium tracking-[-0.01em]">Membros da equipe</CardTitle>
+        <Card className="rounded-2xl border border-border bg-card shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div className="space-y-1">
+              <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Membros da equipe</CardTitle>
               <CardDescription>
                 Gerencie quem tem acesso ao Radar Comercial da sua empresa
               </CardDescription>
@@ -355,7 +364,7 @@ export default function TeamPage() {
                       </Button>
                       <Button onClick={() => {
                         setInviteDialogOpen(false)
-                        router.push('/dashboard/settings')
+                        router.push('/dashboard/billing')
                       }}>
                         Ver Planos
                       </Button>
@@ -381,7 +390,7 @@ export default function TeamPage() {
                         />
                       </Field>
                       <Field>
-                        <FieldLabel htmlFor="role">Funcao</FieldLabel>
+                        <FieldLabel htmlFor="role">Função</FieldLabel>
                         <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as typeof inviteRole)}>
                           <SelectTrigger>
                             <SelectValue />
@@ -425,101 +434,118 @@ export default function TeamPage() {
             </Dialog>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {members.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-4"
-                >
-                  <div className="flex items-center gap-4">
-                    <Avatar className="h-12 w-12">
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {getInitials(member.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{member.name}</p>
-                        {isCurrentUser(member.email) && (
-                          <Badge variant="secondary" className="text-xs">Voce</Badge>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+                <Spinner className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">Carregando equipe...</p>
+              </div>
+            ) : members.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+                <div className="mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-accent">
+                  <Users className="h-6 w-6 text-primary" aria-hidden="true" />
+                </div>
+                <p className="text-sm font-medium text-foreground">Nenhum membro ainda</p>
+                <p className="max-w-xs text-sm text-muted-foreground">
+                  Convide seu time para colaborar nas oportunidades do Radar Comercial.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {members.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between gap-4 rounded-xl border border-border p-4 transition-colors hover:bg-accent/40"
+                  >
+                    <div className="flex min-w-0 items-center gap-4">
+                      <Avatar className="h-11 w-11 shrink-0">
+                        <AvatarFallback className="bg-accent text-sm font-semibold text-primary">
+                          {getInitials(member.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate font-medium text-foreground">{member.name}</p>
+                          {isCurrentUser(member.email) && (
+                            <Badge variant="secondary" className="rounded-full text-xs">Você</Badge>
+                          )}
+                        </div>
+                        <p className="truncate text-sm text-muted-foreground">{member.email}</p>
+                        {member.status === 'pending' && (
+                          <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-warning">
+                            <Clock className="h-3 w-3" aria-hidden="true" />
+                            Convite pendente
+                          </p>
+                        )}
+                        {member.status !== 'pending' && member.joinedAt && (
+                          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                            <CheckCircle className="h-3 w-3" aria-hidden="true" />
+                            Membro desde {new Date(member.joinedAt).toLocaleDateString('pt-BR')}
+                          </p>
                         )}
                       </div>
-                      <p className="text-sm text-muted-foreground">{member.email}</p>
-                      {member.status === 'pending' && (
-                        <p className="flex items-center gap-1 text-xs text-warning">
-                          <Clock className="h-3 w-3" />
-                          Convite pendente
-                        </p>
-                      )}
-                      {member.joinedAt && (
-                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <CheckCircle className="h-3 w-3" />
-                          Membro desde {new Date(member.joinedAt).toLocaleDateString('pt-BR')}
-                        </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-3">
+                      <Badge className={cn('rounded-full', roleConfig[member.role]?.color || roleConfig.viewer.color)}>
+                        {roleConfig[member.role]?.label || 'Membro'}
+                      </Badge>
+
+                      {!isCurrentUser(member.email) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Ações</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openRoleDialog(member)}>
+                              <Shield className="mr-2 h-4 w-4" />
+                              Alterar função
+                            </DropdownMenuItem>
+                            {member.status === 'pending' && (
+                              <DropdownMenuItem onClick={() => handleResendInvite(member.id)}>
+                                <Mail className="mr-2 h-4 w-4" />
+                                Reenviar convite
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => {
+                                setMemberToRemove(member)
+                                setRemoveDialogOpen(true)
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Remover
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-3">
-                    <Badge className={cn(roleConfig[member.role]?.color || roleConfig.viewer.color)}>
-                      {roleConfig[member.role]?.label || 'Membro'}
-                    </Badge>
-
-                    {!isCurrentUser(member.email) && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Acoes</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openRoleDialog(member)}>
-                            <Shield className="mr-2 h-4 w-4" />
-                            Alterar funcao
-                          </DropdownMenuItem>
-                          {member.status === 'pending' && (
-                            <DropdownMenuItem onClick={() => handleResendInvite(member.id)}>
-                              <Mail className="mr-2 h-4 w-4" />
-                              Reenviar convite
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => {
-                              setMemberToRemove(member)
-                              setRemoveDialogOpen(true)
-                            }}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Remover
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Role Permissions */}
-        <Card>
+        <Card className="rounded-2xl border border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle>Permissoes por funcao</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Permissões por função</CardTitle>
             <CardDescription>
-              Entenda o que cada funcao pode fazer no sistema
+              Entenda o que cada função pode fazer no sistema
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 sm:grid-cols-3">
               {Object.entries(roleConfig).map(([key, config]) => (
-                <div key={key} className="rounded-lg border border-border p-4">
-                  <Badge className={cn('mb-3', config.color)}>{config.label}</Badge>
+                <div key={key} className="rounded-xl border border-border bg-background p-4">
+                  <Badge className={cn('mb-3 rounded-full', config.color)}>{config.label}</Badge>
                   <p className="text-sm text-muted-foreground">{config.description}</p>
-                  <ul className="mt-3 space-y-1 text-sm">
+                  <ul className="mt-3 space-y-1.5 text-sm">
                     {key === 'admin' && (
                       <>
                         <li className="flex items-center gap-2">
@@ -646,5 +672,13 @@ export default function TeamPage() {
         </Dialog>
       </div>
     </div>
+  )
+}
+
+export default function TeamPage() {
+  return (
+    <ProtectedRoute requiredRoles={['admin']}>
+      <TeamPageContent />
+    </ProtectedRoute>
   )
 }

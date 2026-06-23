@@ -10,6 +10,7 @@ export interface User {
     email: string
     name: string
     role: 'admin' | 'analyst' | 'viewer'
+    status?: 'pending' | 'active'
     companyId: string
     createdAt: string
     updatedAt: string
@@ -83,6 +84,8 @@ export interface User {
     revenueGrowth: number
     uniqueCustomers: number
     uniqueProducts: number
+    /** "live" se o dado é recente (≤7d); senão "até DD/MM/YYYY" do arquivo. */
+    dataFreshness?: string
   }
   
   /** Oportunidade comercial identificada — tipo único e definitivo. */
@@ -221,6 +224,17 @@ export interface User {
     key: string  // plaintext — returned only on creation
   }
 
+  export interface SyncConfig {
+    id: string
+    type: string
+    sheetUrl: string | null
+    sheetName: string | null
+    enabled: boolean
+    lastSyncAt: string | null
+    lastSyncStatus: 'ok' | 'error' | null
+    lastSyncError: string | null
+  }
+
   export interface NotificationPreference {
     enabled: boolean
     emailEnabled: boolean
@@ -244,6 +258,11 @@ export interface User {
     action: OpportunityAction
   }
 
+  export interface GenerateMessageResponse {
+    message: string
+    cached: boolean
+  }
+
   export interface RankingEntry {
     userId: string
     userName: string
@@ -255,3 +274,62 @@ export interface User {
     conversionRate: number
   }
   
+  export interface OutreachConfig {
+    autoSendEnabled: boolean
+    whatsappEnabled: boolean
+    emailEnabled: boolean
+    whatsappStatus: 'disconnected' | 'connecting' | 'connected'
+    whatsappNumber: string | null
+    senderName: string | null
+    replyToEmail: string | null
+    sendHour: number
+    minOpportunityValue: number
+    dailyLimit: number
+    cadenceEnabled: boolean
+    evolutionConfigured: boolean
+  }
+
+  export interface OutreachContact {
+    customerHash: string
+    customerName: string
+    phone: string | null
+    email: string | null
+    optOut: boolean
+    segment: string
+    recencyDays: number
+    totalRevenue: number
+    sentRecently: boolean
+  }
+
+  export interface RecoverySummary {
+    totalRecovered: number
+    recoveredCount: number
+    pendingCount: number
+    repliesCount: number
+    byChannel: Record<string, number>
+    recent: {
+      customerName: string | null
+      value: number | null
+      channel: string | null
+      resolvedAt: string | null
+    }[]
+  }
+
+  export interface ChurnRiskCustomer {
+    customerHash: string
+    customerName: string
+    risk: 'low' | 'medium' | 'high'
+    score: number
+    recencyDays: number
+    avgIntervalDays: number
+    totalRevenue: number
+    expectedValue: number
+    phone: string | null
+    email: string | null
+  }
+
+  export interface ChurnRiskData {
+    customers: ChurnRiskCustomer[]
+    counts: { high: number; medium: number; low: number }
+    total: number
+  }

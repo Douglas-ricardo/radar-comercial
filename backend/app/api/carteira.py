@@ -2,7 +2,7 @@
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,8 @@ class UpsertActionRequest(BaseModel):
 def list_carteira(
     company_id: str,
     status: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
 ):
@@ -81,7 +83,9 @@ def list_carteira(
             },
         })
 
-    return {"success": True, "data": result}
+    total = len(result)
+    page = result[offset: offset + limit]
+    return {"success": True, "data": page, "pagination": {"total": total, "limit": limit, "offset": offset}}
 
 
 @router.post("/{company_id}/actions")
@@ -180,6 +184,6 @@ def get_ranking(
     ranking.sort(key=lambda x: x["won"], reverse=True)
 
     if token_data.role == "analyst":
-        ranking = [r for r in ranking if r["user_id"] == token_data.user_id]
+        ranking = [r for r in ranking if r["userId"] == token_data.user_id]
 
     return {"success": True, "data": ranking}

@@ -1,7 +1,27 @@
 # app/core/rate_limit.py
+import os
+
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-# Limiter global — usa IP do cliente como chave.
-# Aplicado por endpoint via @limiter.limit("N/period")
-limiter = Limiter(key_func=get_remote_address)
+
+def _client_ip(request) -> str:
+    """
+    Chave do rate limit. Atrás de proxy/load balancer (Render, Fly, nginx) o IP
+    real vem no X-Forwarded-For; usamos o primeiro da cadeia. Sem proxy, cai no
+    IP direto do socket.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+# Storage: usa Redis quando disponível (compartilha contadores entre instâncias);
+# senão memória local (dev / instância única).
+_redis_url = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL")
+
+limiter = Limiter(
+    key_func=_client_ip,
+    storage_uri=_redis_url if _redis_url else "memory://",
+)

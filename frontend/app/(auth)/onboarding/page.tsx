@@ -18,6 +18,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
 import { CheckCircle, Building2, Users, Zap, Crown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PLAN_LIST, type PlanId } from '@/lib/plans'
 import { toast } from 'sonner'
 
 type Step = 'company' | 'industry' | 'plan'
@@ -37,51 +38,10 @@ const industries = [
 
 const employeeCounts = ['1-10', '11-50', '51-200', '201-500', '500+']
 
-const plans = [
-  {
-    id: 'free' as const,
-    name: 'Gratuito',
-    price: 'R$ 0',
-    period: '/mês',
-    description: 'Para começar a explorar',
-    features: ['5 uploads/mês', 'Análise básica', '1 usuário', 'Suporte por email'],
-    icon: Zap,
-    popular: false,
-  },
-  {
-    id: 'pro' as const,
-    name: 'Profissional',
-    price: 'R$ 199',
-    period: '/mês',
-    description: 'Para times em crescimento',
-    features: [
-      '50 uploads/mês',
-      'Análise avançada',
-      'Até 10 usuários',
-      'Suporte prioritário',
-      'Exportação PDF',
-    ],
-    icon: Users,
-    popular: true,
-  },
-  {
-    id: 'enterprise' as const,
-    name: 'Enterprise',
-    price: 'Personalizado',
-    period: '',
-    description: 'Para grandes operações',
-    features: [
-      'Uploads ilimitados',
-      'Análise customizada',
-      'Usuários ilimitados',
-      'Suporte dedicado',
-      'API access',
-      'SSO',
-    ],
-    icon: Crown,
-    popular: false,
-  },
-]
+const PLAN_ICONS: Record<PlanId, typeof Zap> = { free: Zap, pro: Users, enterprise: Crown }
+
+// Planos vêm da fonte única (lib/plans.ts); ícone é só apresentação.
+const plans = PLAN_LIST.map((p) => ({ ...p, icon: PLAN_ICONS[p.id] }))
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<Step>('company')

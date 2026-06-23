@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle, Eye, EyeOff, CheckCircle } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff, CheckCircle, Radar } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
 function validatePassword(password: string) {
@@ -84,10 +84,15 @@ export default function SignupPage() {
 
   return (
     <Card className="w-full max-w-md">
-      <CardHeader className="space-y-1 text-center">
-        <CardTitle className="font-serif text-2xl tracking-[-0.01em]">Criar conta</CardTitle>
+      <CardHeader className="space-y-3 text-center">
+        <div className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+          <Radar className="h-6 w-6 text-primary" aria-hidden="true" />
+        </div>
+        <CardTitle className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">
+          Crie sua conta grátis
+        </CardTitle>
         <CardDescription>
-          Comece a descobrir oportunidades de vendas perdidas
+          5 análises por mês · sem cartão de crédito
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -248,11 +253,11 @@ export default function SignupPage() {
 
           <p className="text-center text-xs text-muted-foreground">
             Ao criar uma conta, você concorda com nossos{' '}
-            <Link href="/terms" className="text-primary hover:underline">
-              Termos de Serviço
+            <Link href="/termos" className="text-primary hover:underline">
+              Termos de Uso
             </Link>{' '}
             e{' '}
-            <Link href="/privacy" className="text-primary hover:underline">
+            <Link href="/privacidade" className="text-primary hover:underline">
               Política de Privacidade
             </Link>
           </p>

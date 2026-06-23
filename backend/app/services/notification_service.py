@@ -30,22 +30,45 @@ class NotificationService:
 
     @staticmethod
     def send_whatsapp(to_phone: str, message: str) -> bool:
-        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-        from_number = os.getenv("TWILIO_WHATSAPP_FROM")
+        """Envia mensagem via WhatsApp Cloud API (Meta).
 
-        if not all([account_sid, auth_token, from_number]):
-            logger.warning("notification.whatsapp.twilio_not_configured")
+        Requer:
+          WHATSAPP_API_TOKEN      — token permanente gerado no Meta Business
+          WHATSAPP_PHONE_NUMBER_ID — ID do número registrado no painel Meta
+        O número de destino deve estar no formato E.164 (ex: +5511999999999).
+        """
+        api_token = os.getenv("WHATSAPP_API_TOKEN")
+        phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+
+        if not all([api_token, phone_number_id]):
+            logger.warning("notification.whatsapp.not_configured")
             return False
+
+        # normaliza para E.164 — remove "whatsapp:" se vier do campo legacy
+        to_e164 = to_phone.replace("whatsapp:", "").strip()
+        if not to_e164.startswith("+"):
+            to_e164 = f"+{to_e164}"
+
+        url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to_e164,
+            "type": "text",
+            "text": {"preview_url": False, "body": message},
+        }
+
         try:
-            from twilio.rest import Client
-            client = Client(account_sid, auth_token)
-            to_wa = to_phone if to_phone.startswith("whatsapp:") else f"whatsapp:{to_phone}"
-            client.messages.create(from_=from_number, to=to_wa, body=message)
-            logger.info("notification.whatsapp.sent", extra={"to": to_phone})
+            import httpx
+            response = httpx.post(url, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            logger.info("notification.whatsapp.sent", extra={"to": to_e164})
             return True
         except Exception as exc:
-            logger.error("notification.whatsapp.error", extra={"to": to_phone, "error": str(exc)})
+            logger.error("notification.whatsapp.error", extra={"to": to_e164, "error": str(exc)})
             return False
 
     @staticmethod
@@ -55,9 +78,9 @@ class NotificationService:
         app_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
         rows = ""
         for opp in opportunities[:10]:
-            customer = opp.get("customer_name", "Cliente")
-            value = opp.get("expected_value", 0)
-            days = opp.get("days_inactive", 0)
+            customer = opp.get("customer", "Cliente")
+            value = opp.get("expectedValue", 0)
+            days = opp.get("daysInactive", 0)
             rows += (
                 f"<tr>"
                 f"<td style='padding:8px;border-bottom:1px solid #eee'>{customer}</td>"
@@ -98,9 +121,9 @@ class NotificationService:
         app_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
         lines = [f"Olá {user_name}! 📊 *Radar Comercial* — oportunidades de hoje:\n"]
         for opp in opportunities[:5]:
-            customer = opp.get("customer_name", "Cliente")
-            value = opp.get("expected_value", 0)
-            days = opp.get("days_inactive", 0)
+            customer = opp.get("customer", "Cliente")
+            value = opp.get("expectedValue", 0)
+            days = opp.get("daysInactive", 0)
             lines.append(f"• *{customer}* — {days} dias sem comprar — R$ {value:,.2f}")
         lines.append(f"\nVer mais: {app_url}/dashboard/insights")
         return "\n".join(lines)

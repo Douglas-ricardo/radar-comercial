@@ -214,10 +214,12 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
                 </p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/dashboard/billing')}>
-                <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
-                Plano e faturamento
-              </DropdownMenuItem>
+              {user?.role === 'admin' && (
+                <DropdownMenuItem onClick={() => router.push('/dashboard/billing')}>
+                  <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Plano e faturamento
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                 <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                 Configurações da empresa

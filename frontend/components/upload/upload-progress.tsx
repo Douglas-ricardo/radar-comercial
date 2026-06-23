@@ -20,9 +20,9 @@ const statusConfig = {
   },
   processing: {
     label: 'Processando análise...',
-    barColor: 'bg-chart-2',
+    barColor: 'bg-primary',
     icon: Loader2,
-    iconClass: 'animate-spin text-chart-2',
+    iconClass: 'animate-spin text-primary',
   },
   completed: {
     label: 'Análise concluída!',
@@ -77,10 +77,10 @@ export function UploadProgress({
   const roundedProgress = Math.round(progress)
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6">
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
       <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-secondary">
-          <FileSpreadsheet className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent">
+          <FileSpreadsheet className="h-6 w-6 text-primary" aria-hidden="true" />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -108,7 +108,7 @@ export function UploadProgress({
           </div>
 
           {/* Barra de progresso semântica */}
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-secondary">
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-accent/60">
             <div
               role="progressbar"
               aria-valuenow={roundedProgress}
