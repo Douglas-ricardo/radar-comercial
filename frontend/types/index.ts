@@ -33,9 +33,40 @@ export interface User {
     auditRetentionDays?: number
     /** Moeda de exibição ISO 4217 (default BRL). */
     currency?: string
+    /** Tenant sandbox (dados demo). */
+    isSandbox?: boolean
     ownerId: string
     createdAt: string
     updatedAt: string
+  }
+
+  // --------------- Uso & Quotas ---------------
+
+  export interface UsageKind {
+    last30: number
+    today: number
+    quota: number | null
+  }
+
+  export interface UsageData {
+    byKind: Record<string, UsageKind>
+    daily: Array<Record<string, string | number>>
+    plan: string
+  }
+
+  // --------------- Status / SLA ---------------
+
+  export interface ServiceStatus {
+    status: 'operational' | 'degraded' | 'down'
+    latencyMs?: number
+    workers?: number
+    error?: string
+    note?: string
+  }
+
+  export interface StatusData {
+    overall: 'operational' | 'degraded' | 'outage'
+    services: Record<string, ServiceStatus>
   }
   
   export interface AuthState {

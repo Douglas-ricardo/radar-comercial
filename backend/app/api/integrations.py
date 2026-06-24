@@ -297,6 +297,10 @@ def ingest_data(
         extra={"company_id": company_id, "records": len(body.records), "file_id": file_record.id},
     )
 
+    from app.services import usage_service
+    usage_service.record_usage(db, company_id, "api_call")
+    usage_service.record_usage(db, company_id, "upload")
+
     return {
         "success": True,
         "data": {"file_id": file_record.id, "records_queued": len(body.records)},

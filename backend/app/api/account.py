@@ -145,11 +145,76 @@ def update_company(
             "ipAllowlist": company.ip_allowlist or [],
             "auditRetentionDays": company.audit_retention_days,
             "currency": company.currency,
+            "isSandbox": company.is_sandbox,
             "ownerId": company.owner_id,
             "createdAt": company.created_at.isoformat() if company.created_at else None,
             "updatedAt": company.updated_at.isoformat() if company.updated_at else None,
         },
     }
+
+
+# ─── Metering de uso + quotas ─────────────────────────────────────────────────
+
+@company_router.get("/{company_id}/usage")
+def get_usage(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Uso agregado (30 dias) por tipo + consumo de hoje vs quota do plano."""
+    if company_id != token_data.company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    from datetime import timedelta
+    from app.core.clock import utcnow
+    from app.domain.models import UsageEvent
+    from app.services import usage_service
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    since = (utcnow() - timedelta(days=30, hours=3)).strftime("%Y-%m-%d")
+    today = (utcnow() - timedelta(hours=3)).strftime("%Y-%m-%d")
+
+    rows = db.query(UsageEvent).filter(
+        UsageEvent.company_id == company_id, UsageEvent.day >= since
+    ).all()
+
+    by_kind: dict[str, dict] = {}
+    series: dict[str, dict[str, int]] = {}
+    for k in usage_service.KINDS:
+        by_kind[k] = {
+            "last30": 0,
+            "today": 0,
+            "quota": usage_service.quota_for(company.plan, k),
+        }
+    for r in rows:
+        if r.kind in by_kind:
+            by_kind[r.kind]["last30"] += r.count or 0
+            if r.day == today:
+                by_kind[r.kind]["today"] = r.count or 0
+        series.setdefault(r.day, {}).setdefault(r.kind, 0)
+        series[r.day][r.kind] += r.count or 0
+
+    daily = [{"day": d, **series[d]} for d in sorted(series.keys())]
+    return {"success": True, "data": {"byKind": by_kind, "daily": daily, "plan": company.plan}}
+
+
+@company_router.post("/{company_id}/seed-demo")
+def seed_demo(
+    company_id: str,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Popula a empresa com dados demo e a marca como sandbox (para testes)."""
+    if company_id != token_data.company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if token_data.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores.")
+    from app.services.demo_seed import seed_demo_data
+    company = db.query(Company).filter(Company.id == company_id).first()
+    seed_demo_data(db, company)
+    from app.services import audit_service
+    audit_service.log_action(db, company_id=company_id, action="sandbox.seeded", user_id=token_data.user_id)
+    db.commit()
+    return {"success": True, "data": {"isSandbox": True, "message": "Dados demo gerados."}}
 
 
 # ─── Portabilidade de dados (LGPD/GDPR) ───────────────────────────────────────

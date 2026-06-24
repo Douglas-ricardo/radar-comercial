@@ -24,4 +24,6 @@ _redis_url = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL")
 limiter = Limiter(
     key_func=_client_ip,
     storage_uri=_redis_url if _redis_url else "memory://",
+    # Expõe X-RateLimit-Limit/Remaining/Reset nas respostas das rotas limitadas.
+    headers_enabled=True,
 )

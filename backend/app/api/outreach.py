@@ -300,6 +300,8 @@ def send_now(request: Request, token=Depends(get_current_user_and_company), db: 
     from app.workers.outreach_tasks import run_company_outreach_task
     company = db.query(Company).filter_by(id=token.company_id).first()
     run_company_outreach_task.delay(token.company_id, company.name if company else "Empresa", token.user_id)
+    from app.services import usage_service
+    usage_service.record_usage(db, token.company_id, "outreach")
     return {"success": True, "data": {"queued": True, "message": "Disparo iniciado em segundo plano."}}
 
 

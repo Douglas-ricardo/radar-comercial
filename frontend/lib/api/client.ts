@@ -52,6 +52,8 @@ import type {
   CrmConnection,
   SavedView,
   CohortData,
+  UsageData,
+  StatusData,
 } from '@/types'
 
 /** Resposta de login: ou autentica direto, ou exige 2º fator (MFA). */
@@ -407,6 +409,20 @@ export const companyApi = {
   },
   async requestDataExport(companyId: string): Promise<ApiResponse<{ queued: boolean; message: string }>> {
     return fetchWithAuth(`/company/${companyId}/export-request`, { method: 'POST' })
+  },
+  async getUsage(companyId: string): Promise<ApiResponse<UsageData>> {
+    return fetchWithAuth(`/company/${companyId}/usage`)
+  },
+  async seedDemo(companyId: string): Promise<ApiResponse<{ isSandbox: boolean; message: string }>> {
+    return fetchWithAuth(`/company/${companyId}/seed-demo`, { method: 'POST' })
+  },
+}
+
+// --------------- Status / SLA (público) ---------------
+
+export const statusApi = {
+  async get(): Promise<ApiResponse<StatusData>> {
+    return fetchWithAuth('/status')
   },
 }
 
@@ -946,6 +962,7 @@ export const api = {
   orgUnits: orgUnitsApi,
   crm: crmApi,
   savedViews: savedViewsApi,
+  status: statusApi,
 }
 
 

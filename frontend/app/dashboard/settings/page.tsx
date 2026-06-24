@@ -24,7 +24,8 @@ import { SecurityTab } from '@/components/settings/security-tab'
 import { SSOTab } from '@/components/settings/sso-tab'
 import { RbacTab } from '@/components/settings/rbac-tab'
 import { ComplianceTab } from '@/components/settings/compliance-tab'
-import { Shield } from 'lucide-react'
+import { UsageCard } from '@/components/settings/usage-card'
+import { Shield, Sparkles } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -203,6 +204,21 @@ export default function SettingsPage() {
       toast.error('Erro de conexão. Tente novamente.')
     } finally {
       setIsSavingCompany(false)
+    }
+  }
+
+  const [isSeeding, setIsSeeding] = useState(false)
+  const handleSeedDemo = async () => {
+    if (!company?.id) return
+    setIsSeeding(true)
+    try {
+      const res = await api.company.seedDemo(company.id)
+      if (res.success) {
+        updateCompany({ isSandbox: true })
+        toast.success('Dados demo gerados. Explore o app com dados de exemplo.')
+      } else toast.error(res.error ?? 'Erro ao gerar dados demo.')
+    } finally {
+      setIsSeeding(false)
     }
   }
 
@@ -532,6 +548,28 @@ export default function SettingsPage() {
                 </Button>
               </CardFooter>
             </Card>
+
+            {/* Sandbox — dados demo */}
+            <Card className="mt-6 rounded-2xl border border-border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
+                    <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+                  </span>
+                  Ambiente de teste (sandbox)
+                  {company?.isSandbox && <Badge className="ml-1 rounded-full border-0 bg-warning/10 text-warning text-xs">Sandbox</Badge>}
+                </CardTitle>
+                <CardDescription>
+                  Gere dados de exemplo para explorar o Radar sem fazer upload. Substitui os insights atuais por uma base demo.
+                </CardDescription>
+              </CardHeader>
+              <CardFooter className="border-t pt-6">
+                <Button variant="outline" onClick={handleSeedDemo} disabled={isSeeding} aria-busy={isSeeding}>
+                  {isSeeding ? <Spinner className="mr-2 h-4 w-4" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  Gerar dados demo
+                </Button>
+              </CardFooter>
+            </Card>
           </TabsContent>}
 
           {/* Aba Notificações — admin e analista (digest por usuário) */}
@@ -716,7 +754,8 @@ export default function SettingsPage() {
           </TabsContent>}
 
           {/* Aba Plano — admin only */}
-          {isAdmin && <TabsContent value="billing">
+          {isAdmin && <TabsContent value="billing" className="space-y-6">
+            <UsageCard />
             <Card className="rounded-2xl border border-border bg-card shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">

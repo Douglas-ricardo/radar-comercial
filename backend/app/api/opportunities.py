@@ -182,4 +182,6 @@ def generate_message(
         "customer_hash": data.customer_hash,
         "company_id": company_id,
     })
+    from app.services import usage_service
+    usage_service.record_usage(db, company_id, "ai_generation")
     return {"success": True, "data": {"message": message, "cached": False}}

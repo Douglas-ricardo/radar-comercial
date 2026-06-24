@@ -34,6 +34,8 @@ class Company(Base):
     audit_retention_days = Column(Integer, default=365, nullable=False)
     # Moeda de exibição (ISO 4217). Afeta formatação no frontend (multi-país).
     currency = Column(String, default="BRL", nullable=False)
+    # Tenant de teste: dados demo, isolado da produção (não afeta cobrança/limites reais).
+    is_sandbox = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -487,6 +489,24 @@ class WebhookDelivery(Base):
     response_code = Column(Integer, nullable=True)
     attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+
+class UsageEvent(Base):
+    """Contador diário de uso por empresa e tipo (metering multi-tenant).
+    Upsert por (company_id, kind, day) — uma linha por dia/tipo."""
+    __tablename__ = "usage_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)   # api_call | upload | ai_generation | outreach
+    day = Column(String, nullable=False)    # "YYYY-MM-DD" (BRT)
+    count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "kind", "day", name="uq_usage_company_kind_day"),
+        Index("ix_usage_company_day", "company_id", "day"),
+    )
 
 
 class CrmConnection(Base):
