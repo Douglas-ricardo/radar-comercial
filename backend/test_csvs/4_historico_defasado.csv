@@ -1,0 +1,78 @@
+date,customer,product,quantity,value
+2025-11-11,Padaria Pao Quente Ltda,Insumo A,11,2266.00
+2026-04-19,Padaria Pao Quente Ltda,Consultoria,5,2791.18
+2025-12-19,Padaria Pao Quente Ltda,Insumo A,12,2475.09
+2026-05-01,Padaria Pao Quente Ltda,Consultoria,12,876.05
+2025-08-06,Padaria Pao Quente Ltda,Servico Mensal,9,2099.15
+2026-01-20,Padaria Pao Quente Ltda,Produto Premium,8,4740.60
+2025-06-18,Padaria Pao Quente Ltda,Produto Standard,8,4670.00
+2025-08-28,Mercado Sao Jorge,Kit Basico,7,4190.15
+2025-09-16,Mercado Sao Jorge,Consultoria,8,2801.20
+2025-10-31,Mercado Sao Jorge,Consultoria,10,2590.38
+2026-03-07,Mercado Sao Jorge,Produto Premium,5,3886.11
+2025-10-15,Mercado Sao Jorge,Plano Anual,9,1409.15
+2025-12-22,Auto Pecas Veloz,Kit Basico,10,2941.62
+2025-06-12,Auto Pecas Veloz,Insumo A,3,2288.08
+2025-09-10,Auto Pecas Veloz,Plano Anual,6,2804.40
+2025-11-03,Farmacia Bem Estar,Insumo A,6,4361.05
+2025-05-23,Farmacia Bem Estar,Consultoria,10,1976.56
+2025-10-17,Farmacia Bem Estar,Servico Mensal,6,3749.06
+2025-11-01,Farmacia Bem Estar,Manutencao,11,3982.73
+2025-06-16,Farmacia Bem Estar,Produto Standard,8,4827.64
+2026-03-12,Farmacia Bem Estar,Insumo B,10,1726.77
+2026-03-25,Farmacia Bem Estar,Insumo A,2,2677.16
+2026-05-08,Restaurante Sabor Caseiro,Produto Standard,7,4367.57
+2026-02-25,Restaurante Sabor Caseiro,Produto Premium,8,3929.47
+2025-12-31,Restaurante Sabor Caseiro,Plano Anual,10,3494.25
+2025-06-17,Restaurante Sabor Caseiro,Produto Premium,6,4276.47
+2025-08-15,Restaurante Sabor Caseiro,Manutencao,6,3171.32
+2025-09-08,Restaurante Sabor Caseiro,Insumo B,1,3125.55
+2025-06-26,Papelaria Escreve Bem,Kit Basico,4,3759.16
+2025-10-05,Papelaria Escreve Bem,Produto Premium,11,3549.07
+2026-03-25,Papelaria Escreve Bem,Insumo A,3,3500.61
+2026-05-01,Papelaria Escreve Bem,Servico Mensal,6,4001.10
+2025-11-13,Construtora Alicerce,Plano Anual,7,813.29
+2025-08-17,Construtora Alicerce,Manutencao,10,3440.82
+2026-02-12,Construtora Alicerce,Produto Standard,3,486.94
+2025-11-01,Construtora Alicerce,Consultoria,8,4572.86
+2026-03-03,Construtora Alicerce,Consultoria,8,3225.73
+2026-01-05,Pet Shop Amigo Fiel,Servico Mensal,8,4515.93
+2025-06-03,Pet Shop Amigo Fiel,Insumo B,3,461.92
+2025-11-20,Pet Shop Amigo Fiel,Kit Basico,11,4813.94
+2025-05-27,Pet Shop Amigo Fiel,Kit Basico,8,4241.99
+2026-02-03,Pet Shop Amigo Fiel,Manutencao,8,622.60
+2025-11-01,Pet Shop Amigo Fiel,Plano Anual,10,1549.77
+2025-12-15,Otica Visao Clara,Servico Mensal,11,2039.45
+2026-05-11,Otica Visao Clara,Servico Mensal,10,3751.34
+2025-12-20,Otica Visao Clara,Consultoria,10,4029.47
+2026-01-23,Otica Visao Clara,Consultoria,10,1328.07
+2025-06-12,Otica Visao Clara,Produto Standard,11,576.10
+2025-06-28,Otica Visao Clara,Servico Mensal,5,3964.19
+2026-04-28,Otica Visao Clara,Plano Anual,12,743.92
+2025-12-15,Otica Visao Clara,Plano Anual,12,2135.97
+2026-03-09,Floricultura Petala,Insumo B,6,2701.18
+2025-12-27,Floricultura Petala,Produto Standard,5,4578.84
+2025-09-11,Floricultura Petala,Kit Basico,12,4364.95
+2026-03-18,Floricultura Petala,Insumo A,2,789.71
+2025-06-03,Acougue Boi Gordo,Manutencao,9,1892.30
+2025-10-25,Acougue Boi Gordo,Servico Mensal,5,2729.20
+2025-09-25,Acougue Boi Gordo,Plano Anual,11,3770.16
+2026-01-01,Acougue Boi Gordo,Manutencao,11,4707.43
+2025-06-04,Sorveteria Gelado,Consultoria,8,222.62
+2025-08-01,Sorveteria Gelado,Plano Anual,10,1184.70
+2026-04-13,Sorveteria Gelado,Insumo A,12,1580.73
+2026-03-17,Livraria Saber,Produto Standard,1,4736.68
+2025-12-11,Livraria Saber,Insumo A,2,576.24
+2025-08-13,Livraria Saber,Produto Standard,7,2322.85
+2025-06-06,Livraria Saber,Insumo B,7,2977.97
+2026-02-25,Livraria Saber,Manutencao,11,585.21
+2025-09-07,Livraria Saber,Manutencao,5,260.31
+2026-01-24,Lava Jato Brilho,Insumo A,8,4757.72
+2025-11-11,Lava Jato Brilho,Produto Premium,11,1899.94
+2025-06-19,Lava Jato Brilho,Plano Anual,1,2050.88
+2026-02-07,Lava Jato Brilho,Produto Premium,8,549.20
+2026-01-27,Lava Jato Brilho,Servico Mensal,1,3955.29
+2026-03-12,Hortifruti Verde Vida,Consultoria,2,4166.11
+2025-08-05,Hortifruti Verde Vida,Consultoria,10,1158.16
+2026-01-16,Hortifruti Verde Vida,Plano Anual,3,3964.35
+2025-07-14,Hortifruti Verde Vida,Servico Mensal,5,4306.19

@@ -1,0 +1,67 @@
+  Data ,CLIENTE,Produto ,  Qtd,Valor (R$)
+14/04/2026,  PADARIA PAO QUENTE LTDA  ,Produto Standard,4,"R$ 3.804,50"
+06/06/2026,  PADARIA PAO QUENTE LTDA  ,Plano Anual,8,"R$ 966,03"
+05/01/2026,  PADARIA PAO QUENTE LTDA  ,Kit Basico,2,"R$ 159,68"
+2025-11-16,mercado sao jorge,Produto Premium,16,3706.29
+2025-11-02,mercado sao jorge,Insumo B,19,5457.22
+2026-04-25,mercado sao jorge,Consultoria,20,3191.44
+26/09/2025,Auto Pecas Veloz,Servico Mensal,2,"R$ 2.146,33"
+17/10/2025,Auto Pecas Veloz,Manutencao,4,"R$ 5.938,72"
+2025-11-04,  FARMACIA BEM ESTAR  ,Produto Premium,11,560.76
+2026-04-05,  FARMACIA BEM ESTAR  ,Kit Basico,20,506.49
+2025-09-12,  FARMACIA BEM ESTAR  ,Manutencao,20,4999.46
+2025-09-21,  FARMACIA BEM ESTAR  ,Insumo B,20,2099.54
+2025-11-11,  FARMACIA BEM ESTAR  ,Produto Premium,18,739.29
+11/11/2025,restaurante sabor caseiro,Consultoria,14,"R$ 3.188,31"
+28/12/2025,restaurante sabor caseiro,Manutencao,14,"R$ 5.800,56"
+02/05/2026,restaurante sabor caseiro,Plano Anual,9,"R$ 2.222,21"
+2026-04-02,Papelaria Escreve Bem,Insumo A,3,4823.41
+2026-05-04,Papelaria Escreve Bem,Produto Premium,14,5830.81
+2026-05-01,Papelaria Escreve Bem,Plano Anual,5,5224.89
+2025-09-08,Papelaria Escreve Bem,Insumo B,18,466.87
+18/04/2026,  CONSTRUTORA ALICERCE  ,Manutencao,2,"R$ 2.905,12"
+23/01/2026,  CONSTRUTORA ALICERCE  ,Plano Anual,4,"R$ 4.222,85"
+28/08/2025,  CONSTRUTORA ALICERCE  ,Produto Standard,16,"R$ 3.576,52"
+25/02/2026,  CONSTRUTORA ALICERCE  ,Plano Anual,18,"R$ 5.938,56"
+2026-04-22,pet shop amigo fiel,Consultoria,14,5350.11
+2025-09-05,pet shop amigo fiel,Insumo B,1,6823.10
+2026-02-03,pet shop amigo fiel,Kit Basico,10,251.22
+2025-12-28,pet shop amigo fiel,Produto Standard,5,2489.61
+26/11/2025,Otica Visao Clara,Servico Mensal,3,"R$ 533,62"
+21/09/2025,Otica Visao Clara,Manutencao,15,"R$ 1.545,17"
+27/12/2025,Otica Visao Clara,Kit Basico,11,"R$ 1.143,99"
+02/09/2025,Otica Visao Clara,Servico Mensal,5,"R$ 4.193,76"
+31/03/2026,Otica Visao Clara,Servico Mensal,3,"R$ 5.293,33"
+31/01/2026,Otica Visao Clara,Manutencao,16,"R$ 3.129,64"
+2025-11-05,  FLORICULTURA PETALA  ,Consultoria,17,2928.58
+2026-04-22,  FLORICULTURA PETALA  ,Produto Premium,10,2448.95
+2025-10-13,  FLORICULTURA PETALA  ,Kit Basico,2,3712.19
+2026-02-27,  FLORICULTURA PETALA  ,Servico Mensal,1,2797.08
+2026-03-07,  FLORICULTURA PETALA  ,Consultoria,5,2144.86
+2026-02-09,  FLORICULTURA PETALA  ,Produto Premium,1,2061.66
+11/11/2025,acougue boi gordo,Manutencao,18,"R$ 1.271,08"
+22/02/2026,acougue boi gordo,Plano Anual,3,"R$ 3.526,82"
+28/11/2025,acougue boi gordo,Servico Mensal,14,"R$ 6.039,26"
+10/06/2026,acougue boi gordo,Produto Premium,11,"R$ 3.245,29"
+29/08/2025,acougue boi gordo,Manutencao,14,"R$ 3.033,53"
+2026-04-22,Sorveteria Gelado,Plano Anual,6,2864.97
+2025-10-27,Sorveteria Gelado,Plano Anual,3,5832.58
+2025-11-08,Sorveteria Gelado,Consultoria,14,5919.17
+2025-11-26,Sorveteria Gelado,Manutencao,10,3691.54
+26/02/2026,  LIVRARIA SABER  ,Produto Standard,3,"R$ 2.364,83"
+01/10/2025,  LIVRARIA SABER  ,Insumo B,17,"R$ 4.450,91"
+12/03/2026,  LIVRARIA SABER  ,Plano Anual,12,"R$ 6.346,16"
+05/04/2026,  LIVRARIA SABER  ,Produto Standard,9,"R$ 1.692,07"
+2026-03-23,lava jato brilho,Produto Premium,6,4236.67
+2025-10-10,lava jato brilho,Insumo A,19,3274.47
+2026-01-05,lava jato brilho,Plano Anual,5,6056.52
+16/05/2026,Hortifruti Verde Vida,Kit Basico,9,"R$ 3.309,00"
+22/05/2026,Hortifruti Verde Vida,Produto Premium,10,"R$ 2.496,00"
+26/10/2025,Hortifruti Verde Vida,Servico Mensal,12,"R$ 3.190,80"
+24/01/2026,Hortifruti Verde Vida,Produto Premium,20,"R$ 583,28"
+03/10/2025,Hortifruti Verde Vida,Insumo B,2,"R$ 2.722,15"
+,TOTAL GERAL,,,"R$ 123.456,78"
+,,,,
+24/06/2026,Cliente Zero,Produto Standard,1,"0,00"
+24/06/2026,Cliente Negativo,Produto Standard,1,"-500,00"
+24/07/2026,Cliente Futuro,Produto Premium,1,"999,00"

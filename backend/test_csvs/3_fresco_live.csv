@@ -1,0 +1,79 @@
+data,cliente,produto,qtd,valor
+08/01/2026,Padaria Pao Quente Ltda,Insumo B,10,3601.46
+21/01/2026,Padaria Pao Quente Ltda,Consultoria,5,1799.76
+18/05/2026,Padaria Pao Quente Ltda,Manutencao,6,2708.61
+11/02/2026,Padaria Pao Quente Ltda,Produto Standard,8,3686.21
+17/12/2025,Padaria Pao Quente Ltda,Insumo B,1,3637.02
+25/12/2025,Padaria Pao Quente Ltda,Servico Mensal,2,2606.72
+27/01/2026,Mercado Sao Jorge,Produto Standard,1,1114.61
+03/03/2026,Mercado Sao Jorge,Consultoria,8,1374.70
+17/02/2026,Mercado Sao Jorge,Kit Basico,7,1083.86
+05/05/2026,Mercado Sao Jorge,Insumo A,1,3021.19
+25/02/2026,Auto Pecas Veloz,Consultoria,2,3146.81
+10/12/2025,Auto Pecas Veloz,Servico Mensal,1,3803.49
+04/04/2026,Auto Pecas Veloz,Servico Mensal,10,694.29
+24/01/2026,Farmacia Bem Estar,Produto Premium,10,3796.25
+26/01/2026,Farmacia Bem Estar,Kit Basico,6,754.38
+21/12/2025,Farmacia Bem Estar,Produto Premium,3,3862.41
+28/04/2026,Farmacia Bem Estar,Servico Mensal,5,2345.61
+13/02/2026,Restaurante Sabor Caseiro,Consultoria,2,2409.18
+16/12/2025,Restaurante Sabor Caseiro,Consultoria,2,2819.05
+09/03/2026,Restaurante Sabor Caseiro,Produto Premium,10,3152.28
+26/02/2026,Restaurante Sabor Caseiro,Insumo B,7,2679.93
+08/05/2026,Restaurante Sabor Caseiro,Insumo B,6,149.34
+07/02/2026,Restaurante Sabor Caseiro,Insumo A,2,1790.74
+14/12/2025,Papelaria Escreve Bem,Insumo A,3,1798.40
+12/01/2026,Papelaria Escreve Bem,Kit Basico,10,3251.98
+08/01/2026,Papelaria Escreve Bem,Insumo A,8,1798.74
+25/12/2025,Papelaria Escreve Bem,Kit Basico,6,3421.68
+03/05/2026,Papelaria Escreve Bem,Kit Basico,8,1051.07
+31/12/2025,Construtora Alicerce,Manutencao,6,211.93
+03/03/2026,Construtora Alicerce,Produto Standard,8,927.27
+20/03/2026,Construtora Alicerce,Plano Anual,5,3533.25
+16/03/2026,Construtora Alicerce,Insumo B,1,2114.85
+07/04/2026,Construtora Alicerce,Produto Premium,4,2908.29
+20/01/2026,Construtora Alicerce,Insumo B,4,2793.38
+31/01/2026,Pet Shop Amigo Fiel,Servico Mensal,2,1247.52
+11/02/2026,Pet Shop Amigo Fiel,Consultoria,5,2689.44
+20/02/2026,Pet Shop Amigo Fiel,Insumo A,9,2170.60
+06/02/2026,Pet Shop Amigo Fiel,Insumo B,6,1472.06
+29/01/2026,Pet Shop Amigo Fiel,Kit Basico,5,1080.47
+25/04/2026,Pet Shop Amigo Fiel,Consultoria,6,566.26
+06/04/2026,Otica Visao Clara,Consultoria,8,1178.35
+26/12/2025,Otica Visao Clara,Insumo B,10,1203.69
+30/04/2026,Otica Visao Clara,Consultoria,5,987.18
+10/04/2026,Otica Visao Clara,Kit Basico,1,2861.27
+16/03/2026,Floricultura Petala,Servico Mensal,1,2258.10
+23/04/2026,Floricultura Petala,Insumo A,2,3503.61
+30/12/2025,Floricultura Petala,Kit Basico,8,1966.99
+27/02/2026,Floricultura Petala,Produto Standard,1,1084.67
+26/04/2026,Acougue Boi Gordo,Produto Premium,7,2017.81
+29/12/2025,Acougue Boi Gordo,Servico Mensal,3,681.87
+01/01/2026,Acougue Boi Gordo,Kit Basico,2,3976.28
+25/04/2026,Acougue Boi Gordo,Insumo B,7,2464.64
+18/12/2025,Acougue Boi Gordo,Consultoria,9,1583.47
+01/02/2026,Acougue Boi Gordo,Kit Basico,10,3961.12
+31/12/2025,Sorveteria Gelado,Servico Mensal,10,3844.42
+30/04/2026,Sorveteria Gelado,Consultoria,4,1132.12
+05/05/2026,Sorveteria Gelado,Produto Standard,4,777.87
+06/05/2026,Sorveteria Gelado,Produto Standard,1,1693.22
+24/12/2025,Sorveteria Gelado,Insumo A,5,227.30
+14/03/2026,Livraria Saber,Insumo A,2,2780.80
+19/03/2026,Livraria Saber,Consultoria,7,547.63
+29/03/2026,Livraria Saber,Produto Standard,5,3323.86
+07/05/2026,Livraria Saber,Servico Mensal,3,3191.25
+24/12/2025,Livraria Saber,Kit Basico,8,584.98
+11/02/2026,Lava Jato Brilho,Kit Basico,9,2205.93
+02/02/2026,Lava Jato Brilho,Produto Premium,10,255.46
+04/02/2026,Lava Jato Brilho,Plano Anual,10,1076.43
+02/05/2026,Lava Jato Brilho,Consultoria,10,2389.78
+20/05/2026,Lava Jato Brilho,Kit Basico,10,256.90
+25/01/2026,Hortifruti Verde Vida,Insumo B,8,3672.68
+09/04/2026,Hortifruti Verde Vida,Manutencao,8,3879.32
+25/01/2026,Hortifruti Verde Vida,Plano Anual,7,1399.90
+29/04/2026,Hortifruti Verde Vida,Produto Standard,6,1705.42
+21/06/2026,Padaria Pao Quente Ltda,Kit Basico,7,3272.91
+20/06/2026,Mercado Sao Jorge,Servico Mensal,8,443.43
+22/06/2026,Auto Pecas Veloz,Plano Anual,2,3883.72
+21/06/2026,Farmacia Bem Estar,Insumo B,1,2664.88
+20/06/2026,Restaurante Sabor Caseiro,Insumo A,7,311.40

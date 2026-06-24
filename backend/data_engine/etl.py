@@ -2,6 +2,7 @@
 import hashlib
 import logging
 import os
+import re
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta
@@ -24,9 +25,10 @@ CANONICAL_COLUMNS = {
     "servico": "product_id", "product_id": "product_id", "descricao": "product_id",
     "descricao_produto": "product_id", "sku": "product_id", "cod_produto": "product_id",
     "quantidade": "qty", "qty": "qty", "qtd": "qty", "quant": "qty", "qtde": "qty",
+    "quantity": "qty",
     "valor": "revenue", "revenue": "revenue", "preco": "revenue", "total": "revenue",
     "valor_total": "revenue", "receita": "revenue", "faturamento": "revenue",
-    "preco_total": "revenue", "vlr_total": "revenue",
+    "preco_total": "revenue", "vlr_total": "revenue", "value": "revenue",
     # Contato do cliente final (opcional) — habilita disparo WhatsApp/email
     "telefone": "phone", "celular": "phone", "whatsapp": "phone", "fone": "phone",
     "phone": "phone", "contato": "phone", "tel": "phone",
@@ -55,12 +57,41 @@ except AttributeError:
     _STRING_TYPES = (pl.Utf8,)
 
 
+def _canon_key(col: str) -> str:
+    """Normaliza nome de coluna p/ casar com CANONICAL_COLUMNS de forma robusta."""
+    c = col.strip().lower()
+    c = re.sub(r"\(.*?\)", "", c)           # remove "(r$)", "(un)"
+    c = re.sub(r"[\s\-]+", "_", c.strip())  # "data venda" -> "data_venda"
+    c = re.sub(r"_+", "_", c).strip("_")    # colapsa underscores
+    return c
+
+
+def _build_rename_map(cols) -> dict:
+    """
+    Mapeia colunas ORIGINAIS → canônicas via _canon_key. Guard de colisão: se duas
+    colunas normalizam para a mesma canônica (ex.: "Valor" e "Valor Total" → revenue),
+    mantém só a primeira — o polars quebraria o rename com nomes-alvo duplicados.
+    As chaves do dict são os nomes originais, o que preserva o column-pushdown do CSV.
+    """
+    rename_map: dict[str, str] = {}
+    seen_targets: set[str] = set()
+    for c in cols:
+        canonical = CANONICAL_COLUMNS.get(_canon_key(c))
+        if canonical is None:
+            continue
+        if canonical in seen_targets:
+            logger.warning(
+                "etl.header.collision",
+                extra={"ignored_column": c, "canonical": canonical},
+            )
+            continue
+        seen_targets.add(canonical)
+        rename_map[c] = canonical
+    return rename_map
+
+
 def normalize_columns(df: pl.DataFrame) -> pl.DataFrame:
-    rename_map = {
-        c: CANONICAL_COLUMNS[c.lower().strip()]
-        for c in df.columns
-        if c.lower().strip() in CANONICAL_COLUMNS
-    }
+    rename_map = _build_rename_map(df.columns)
     return df.rename(rename_map) if rename_map else df
 
 
@@ -83,47 +114,90 @@ def _ensure_optional_columns(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(extras) if extras else df
 
 
-# Formatos de data tentados em ordem — o que parsear mais linhas vence.
+# Formatos de data tentados em ordem — a ordem define a precedência em datas
+# ambíguas (BR `%d/%m/%Y` antes de US `%m/%d/%Y`).
 _DATE_FORMATS = ["%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
+
+# Acima deste limiar de datas não reconhecidas, aborta em vez de descartar calado.
+# (decisão de produto — ajuste ao apetite de risco)
+_DATE_NULL_THRESHOLD = 0.30
 
 
 def _parse_dates_multi_format(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Tenta cada formato em _DATE_FORMATS e fica com o que produziu menos nulls.
-    Em empate, vence o primeiro da lista (BR `%d/%m/%Y`) — coerente com o público.
-    Quando BR e US (`%m/%d/%Y`) empatam, há ambiguidade real (ex.: "05/03/2024"):
-    mantemos o BR mas registramos aviso, pois algumas datas podem estar trocadas.
+    Coalesce de TODOS os formatos por linha: permite formatos mistos no mesmo
+    arquivo (ISO + dd/mm/yyyy + ...). A ordem de _DATE_FORMATS define a precedência
+    em datas ambíguas (BR antes de US). Aborta se a perda de linhas exceder
+    _DATE_NULL_THRESHOLD em vez de descartar metade do arquivo em silêncio.
     """
-    best_series = None
-    best_nulls = None
-    nulls_by_fmt = {}
-    for fmt in _DATE_FORMATS:
-        parsed = df["date"].str.to_date(fmt, strict=False)
-        nulls = parsed.null_count()
-        nulls_by_fmt[fmt] = nulls
-        if best_nulls is None or nulls < best_nulls:
-            best_series = parsed
-            best_nulls = nulls
+    total = df.height
+    if total == 0:
+        return df
+
+    # nulls por formato — só para o AVISO de ambiguidade (não escolhe vencedor)
+    nulls_by_fmt = {
+        fmt: df["date"].str.to_date(fmt, strict=False).null_count()
+        for fmt in _DATE_FORMATS
+    }
+
+    # coalesce: cada linha recupera o 1º formato de _DATE_FORMATS que a parsear
+    attempts = [pl.col("date").str.to_date(fmt, strict=False) for fmt in _DATE_FORMATS]
+    df = df.with_columns(pl.coalesce(attempts).alias("date"))
+
+    nulls = df["date"].null_count()
+    loss = nulls / total
+    if loss > _DATE_NULL_THRESHOLD:
+        raise ValueError(
+            f"{nulls} de {total} datas ({loss:.0%}) não reconhecidas. "
+            f"Verifique a coluna de data. Formatos aceitos: {', '.join(_DATE_FORMATS)}."
+        )
+    if nulls > 0:
+        logger.warning(
+            "etl.dates.dropped",
+            extra={"dropped": nulls, "total": total, "rate": round(loss, 3)},
+        )
 
     # Ambiguidade BR×US: ambos parseiam o mesmo nº de linhas → datas com dia<=12
     # podem ter sido interpretadas como mês. Avisa (não bloqueia).
-    if nulls_by_fmt.get("%d/%m/%Y") == nulls_by_fmt.get("%m/%d/%Y") and best_nulls is not None:
-        total = df.height
-        if best_nulls < total:  # houve parsing efetivo
-            logger.warning(
-                "etl.dates.ambiguous_format",
-                extra={"chosen": "%d/%m/%Y", "note": "BR e US empataram; assumindo dd/mm"},
-            )
-    return df.with_columns(best_series.alias("date"))
+    if nulls_by_fmt.get("%d/%m/%Y") == nulls_by_fmt.get("%m/%d/%Y") and nulls < total:
+        logger.warning(
+            "etl.dates.ambiguous_format",
+            extra={"chosen": "%d/%m/%Y", "note": "BR e US empataram; assumindo dd/mm"},
+        )
+    return df
+
+
+def _clean_money_str(s: str | None) -> float | None:
+    """
+    Converte um valor monetário em string para float detectando o formato POR VALOR.
+    Suporta BR e US/internacional misturados no mesmo arquivo:
+      - Tem vírgula → decimal BR: pontos são milhar, vírgula é decimal.
+        "1.234,56" → 1234.56 ; "1.234.567,89" → 1234567.89
+      - Sem vírgula, com ponto → ponto JÁ é decimal (US): NÃO remover.
+        "3706.29" → 3706.29 (NÃO 370629)
+      - Sem separador → inteiro puro. "1500" → 1500.0
+    """
+    if s is None:
+        return None
+    t = re.sub(r"[R$\s]", "", str(s)).strip()
+    if t == "":
+        return None
+    if "," in t:
+        # decimal BR: pontos são milhar, vírgula é decimal
+        t = t.replace(".", "").replace(",", ".")
+    # senão: ponto (se houver) já é decimal — não mexer
+    try:
+        return float(t)
+    except ValueError:
+        return None
 
 
 def _cast_types(df: pl.DataFrame) -> pl.DataFrame:
     if "revenue" in df.columns and df["revenue"].dtype in _STRING_TYPES:
         df = df.with_columns(
             pl.col("revenue")
-            .str.replace_all(r"R\$", "").str.replace_all(r"\.", "")
-            .str.replace_all(",", ".").str.strip_chars()
-            .cast(pl.Float64, strict=False)
+            .map_elements(_clean_money_str, return_dtype=pl.Float64)
+            .alias("revenue")
         )
     if "date" in df.columns:
         dtype = df["date"].dtype
@@ -249,13 +323,10 @@ def _load_and_normalize(file_path: str) -> pl.DataFrame:
         lf = pl.scan_csv(file_path, try_parse_dates=False, infer_schema_length=10_000)
         raw_cols = lf.columns  # header only — no data loaded yet
 
-        rename_map = {
-            c: CANONICAL_COLUMNS[c.lower().strip()]
-            for c in raw_cols
-            if c.lower().strip() in CANONICAL_COLUMNS
-        }
+        rename_map = _build_rename_map(raw_cols)
         # Select only columns we care about (column pushdown → reads less data from disk).
-        cols_to_read = [c for c in raw_cols if c.lower().strip() in CANONICAL_COLUMNS]
+        # As chaves do rename_map são os nomes ORIGINAIS, então preservam o pushdown.
+        cols_to_read = list(rename_map.keys())
         if cols_to_read:
             lf = lf.select(cols_to_read)
         if rename_map:

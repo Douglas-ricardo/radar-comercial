@@ -6,6 +6,7 @@ import magic
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import update
 
@@ -47,6 +48,22 @@ def _upload_mime_allowed(suffix: str, mime: str) -> bool:
 
 _TEMP_DIR = Path(os.getenv("TEMP_DIR", str(Path(__file__).resolve().parent.parent.parent / "temp")))
 _TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _refund_upload(db: Session, file_id: str, company_id: str) -> None:
+    """
+    Estorna o débito de cota e remove o registo do upload após uma falha que
+    ocorre DEPOIS do incremento atómico de `uploads_used`. Sem isto, um erro do
+    servidor (storage indisponível, broker fora, etc.) queimaria 1 da cota do
+    plano do usuário sem processar nada.
+    """
+    db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
+    db.execute(
+        update(Company)
+        .where(Company.id == company_id)
+        .values(uploads_used=Company.uploads_used - 1)
+    )
+    db.commit()
 
 
 @router.post("/upload")
@@ -151,48 +168,51 @@ async def upload_file(
         # Falha de I/O — reverte tudo
         if os.path.exists(local_file_path):
             os.remove(local_file_path)
-        db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
-        db.execute(
-            update(Company)
-            .where(Company.id == company_id)
-            .values(uploads_used=Company.uploads_used - 1)
-        )
-        db.commit()
+        _refund_upload(db, file_id, company_id)
         logger.error("file.upload.write_error", extra={"file_id": file_id, "error": str(exc)})
         raise HTTPException(status_code=500, detail="Erro ao salvar o arquivo.")
 
-    logger.info(
-        "file.upload.queued",
-        extra={
-            "file_id": file_id,
-            "company_id": company_id,
-            "filename": safe_filename,
-            "uploads_used": company.uploads_used,
-            "uploads_limit": company.uploads_limit,
-        },
-    )
-
-    # Promove ao object storage (R2/Spaces) quando configurado; senão usa o
-    # path local. A ref resultante é o que o worker recebe.
+    # Cauda do upload: log + promoção ao object storage + enfileiramento. A cota já
+    # foi debitada atomicamente acima, então QUALQUER exceção inesperada daqui pra
+    # frente precisa estornar `uploads_used` e devolver JSON padrão — nunca um 500
+    # cru (que queimaria a cota do usuário por um erro do servidor).
+    #
+    # NOTA: a chave do log é `upload_filename`, não `filename`. `filename` é um
+    # atributo RESERVADO do LogRecord do Python e dispara KeyError determinístico.
     try:
-        file_ref = storage.store_from_local(local_file_path, f"uploads/{company_id}/{file_id}_{safe_filename}")
+        logger.info(
+            "file.upload.queued",
+            extra={
+                "file_id": file_id,
+                "company_id": company_id,
+                "upload_filename": safe_filename,
+                "uploads_used": company.uploads_used,
+                "uploads_limit": company.uploads_limit,
+            },
+        )
+
+        # Promove ao object storage (R2/Spaces) quando configurado; senão usa o
+        # path local. A ref resultante é o que o worker recebe.
+        file_ref = storage.store_from_local(
+            local_file_path, f"uploads/{company_id}/{file_id}_{safe_filename}"
+        )
+
+        # Guarda a ref de origem (habilita reprocessar quando RETAIN_SOURCE_FILES=true).
+        db.query(UploadedFile).filter(UploadedFile.id == file_id).update({"source_ref": file_ref})
+        db.commit()
+
+        process_sales_file.delay(file_id, company_id, file_ref)
     except Exception as exc:
         storage.cleanup_local(local_file_path)
-        db.query(UploadedFile).filter(UploadedFile.id == file_id).delete()
-        db.execute(
-            update(Company)
-            .where(Company.id == company_id)
-            .values(uploads_used=Company.uploads_used - 1)
+        _refund_upload(db, file_id, company_id)
+        logger.error("file.upload.enqueue_error", extra={"file_id": file_id, "error": str(exc)})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "Falha ao enfileirar o processamento do arquivo. Tente novamente.",
+            },
         )
-        db.commit()
-        logger.error("file.upload.storage_error", extra={"file_id": file_id, "error": str(exc)})
-        raise HTTPException(status_code=500, detail="Erro ao armazenar o arquivo.")
-
-    # Guarda a ref de origem (habilita reprocessar quando RETAIN_SOURCE_FILES=true).
-    db.query(UploadedFile).filter(UploadedFile.id == file_id).update({"source_ref": file_ref})
-    db.commit()
-
-    process_sales_file.delay(file_id, company_id, file_ref)
 
     return {
         "success": True,
