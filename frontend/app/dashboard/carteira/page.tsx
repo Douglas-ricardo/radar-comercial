@@ -186,11 +186,12 @@ export default function CarteiraPage() {
       const res = await opportunitiesApi.generateMessage(opp.id, opp.customerHash, '1m')
       if (res.success && res.data) {
         setMsgModal({ open: true, text: res.data.message, loading: false })
+        toast.success('Mensagem gerada.')
       } else {
-        setMsgModal({ open: true, text: 'Erro ao gerar mensagem. Tente novamente.', loading: false })
+        setMsgModal({ open: true, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.', loading: false })
       }
     } catch {
-      setMsgModal({ open: true, text: 'Erro ao gerar mensagem. Tente novamente.', loading: false })
+      setMsgModal({ open: true, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.', loading: false })
     }
   }
 
@@ -409,12 +410,9 @@ export default function CarteiraPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {COLUMNS.map((col) => {
-                  // Cada coluna ordena pela métrica do estágio: "a contatar" por prioridade
-                  // (valor × recuperabilidade — para quem ligar primeiro); colunas de desfecho
-                  // por valor (recuperabilidade não tem significado após ganho/perdido).
                   const stageKey = (o: CarteiraOpportunity) =>
                     col.status === 'to_contact'
-                      ? ((o as { priorityValue?: number }).priorityValue ?? o.expectedValue)
+                      ? (o.priorityValue ?? o.expectedValue)
                       : o.expectedValue
                   const items = [...byStatus[col.status]].sort((a, b) => stageKey(b) - stageKey(a))
                   return (
@@ -441,8 +439,9 @@ export default function CarteiraPage() {
                               product={opp.product}
                               frequency={opp.frequency}
                               confidence={opp.confidence}
-                              recoveryScore={(opp as { recoveryScore?: number }).recoveryScore}
-                              recoveryBand={(opp as { recoveryBand?: 'alta' | 'media' | 'baixa' }).recoveryBand}
+                              recoveryScore={opp.recoveryScore}
+                              recoveryBand={opp.recoveryBand}
+                              recoveryReasons={opp.recoveryReasons}
                               onOpen={() => setSelectedOpp(opp)}
                               onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
                             />
@@ -824,7 +823,12 @@ export default function CarteiraPage() {
             </Button>
             <Button
               disabled={msgModal.loading || !msgModal.text}
-              onClick={() => navigator.clipboard.writeText(msgModal.text)}
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(msgModal.text)
+                  .then(() => toast.success('Mensagem copiada.'))
+                  .catch(() => toast.error('Não foi possível copiar.'))
+              }
             >
               Copiar
             </Button>

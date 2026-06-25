@@ -18,6 +18,7 @@ interface OpportunityCardProps {
   confidence?: Confidence
   recoveryScore?: number
   recoveryBand?: 'alta' | 'media' | 'baixa'
+  recoveryReasons?: string[]
   status?: OpportunityStatus
   compact?: boolean
   onOpen?: () => void
@@ -47,6 +48,7 @@ export function OpportunityCard({
   confidence = 'medium',
   recoveryScore,
   recoveryBand,
+  recoveryReasons,
   status,
   compact = false,
   onOpen,
@@ -60,10 +62,13 @@ export function OpportunityCard({
   return (
     <div
       onClick={onOpen}
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onKeyDown={onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } : undefined}
       className={cn(
         'group rounded-[var(--radius)] border border-border bg-card transition-colors',
         compact ? 'p-3.5' : 'p-5',
-        onOpen && 'cursor-pointer hover:border-primary/40 focus-within:border-primary/40',
+        onOpen && 'cursor-pointer hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         className,
       )}
     >
@@ -83,17 +88,22 @@ export function OpportunityCard({
         </p>
       )}
       {recoveryBand && typeof recoveryScore === 'number' && (
-        <span
-          className={cn(
-            'mt-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
-            recoveryBand === 'alta' ? 'bg-success/10 text-success'
-            : recoveryBand === 'media' ? 'bg-warning/10 text-warning'
-            : 'bg-muted text-muted-foreground',
+        <>
+          <span
+            className={cn(
+              'mt-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
+              recoveryBand === 'alta' ? 'bg-success/10 text-success'
+              : recoveryBand === 'media' ? 'bg-warning/10 text-warning'
+              : 'bg-muted text-muted-foreground',
+            )}
+            title="Recuperabilidade (0-100): chance relativa de reativar com base no histórico"
+          >
+            {recoveryScore} · {recoveryBand === 'media' ? 'média' : recoveryBand} recuperação
+          </span>
+          {recoveryReasons && recoveryReasons.length > 0 && (
+            <p className="mt-0.5 text-xs text-muted-foreground">{recoveryReasons[0]}</p>
           )}
-          title="Recuperabilidade (0-100): chance relativa de reativar com base no histórico"
-        >
-          {recoveryScore} · {recoveryBand === 'media' ? 'média' : recoveryBand} recuperação
-        </span>
+        </>
       )}
 
       {/* número-herói: serifa, tinta-navy, figuras tabulares */}
@@ -136,7 +146,7 @@ export function OpportunityCard({
             }}
           >
             <Sparkles className="h-3.5 w-3.5" /> Gerar mensagem
-            <ArrowRight className="h-3.5 w-3.5 opacity-60 transition-transform group-hover:translate-x-0.5" />
+            <ArrowRight className="h-3.5 w-3.5 opacity-60 transition-transform motion-safe:group-hover:translate-x-0.5" />
           </Button>
         )}
       </div>

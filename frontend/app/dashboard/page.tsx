@@ -64,7 +64,9 @@ export default function DashboardPage() {
           setQueue(
             all
               .filter((o) => o.action.status === 'to_contact')
-              .sort((a, b) => b.expectedValue - a.expectedValue),
+              .sort((a, b) =>
+                (b.priorityValue ?? b.expectedValue) - (a.priorityValue ?? a.expectedValue),
+              ),
           )
           setWonCount(all.filter((o) => o.action.status === 'won').length)
           setTotalActions(all.length)
@@ -84,19 +86,24 @@ export default function DashboardPage() {
     setMsg({ open: true, text: '', loading: true })
     try {
       const res = await opportunitiesApi.generateMessage(opp.id, opp.customerHash, '1m')
-      setMsg({ open: true, loading: false, text: res.success && res.data ? res.data.message : 'Erro ao gerar mensagem. Tente novamente.' })
+      if (res.success && res.data) {
+        setMsg({ open: true, loading: false, text: res.data.message })
+        toast.success('Mensagem gerada.')
+      } else {
+        setMsg({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+      }
     } catch {
-      setMsg({ open: true, loading: false, text: 'Erro ao gerar mensagem. Tente novamente.' })
+      setMsg({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
 
   const recoverableNow = queue.reduce((s, o) => s + o.expectedValue, 0)
-  const conversion = totalActions > 0 ? Math.round((wonCount / totalActions) * 100) : 0
+  const conversion = totalActions > 0 ? Math.round((wonCount / totalActions) * 100) : null
 
   const kpis = [
     { label: 'Recuperado', value: formatCurrency(recovery?.totalRecovered ?? 0), tone: 'text-success' },
     { label: 'Em risco', value: formatCurrency(insights?.summary?.lostRevenue ?? 0), tone: 'text-destructive' },
-    { label: 'Conversão da carteira', value: `${conversion}%`, tone: 'text-foreground' },
+    { label: 'Conversão da carteira', value: conversion !== null ? `${conversion}%` : 'Sem contatos', tone: 'text-foreground' },
     { label: 'Clientes ativos', value: String(insights?.summary?.uniqueCustomers ?? '—'), tone: 'text-foreground' },
   ]
 
@@ -143,7 +150,7 @@ export default function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
                 <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Quem contatar hoje</CardTitle>
-                <CardDescription>Priorizado por valor recuperável</CardDescription>
+                <CardDescription>Priorizado por valor e chance de retorno</CardDescription>
               </div>
               <Link href="/dashboard/carteira">
                 <Button variant="ghost" size="sm" className="text-primary hover:bg-accent hover:text-primary">Ver carteira</Button>
@@ -164,6 +171,10 @@ export default function DashboardPage() {
                 <div className="space-y-2">
                   {queue.slice(0, 6).map((opp) => {
                     const conf = CONFIDENCE[opp.confidence] ?? CONFIDENCE.medium
+                    const recovTone =
+                      opp.recoveryBand === 'alta' ? 'text-success'
+                      : opp.recoveryBand === 'media' ? 'text-warning'
+                      : 'text-muted-foreground'
                     return (
                       <div
                         key={opp.id}
@@ -180,9 +191,16 @@ export default function DashboardPage() {
                         <div className="flex shrink-0 items-center gap-4">
                           <div className="text-right">
                             <p className="text-sm font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</p>
-                            <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium', conf.tone)}>
-                              <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> {conf.label}
-                            </span>
+                            {opp.recoveryBand && typeof opp.recoveryScore === 'number' ? (
+                              <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium tabular-nums', recovTone)}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+                                {opp.recoveryScore} · {opp.recoveryBand === 'media' ? 'média' : opp.recoveryBand}
+                              </span>
+                            ) : (
+                              <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium', conf.tone)}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> {conf.label}
+                              </span>
+                            )}
                           </div>
                           {(user?.role === 'admin' || user?.role === 'analyst') && (
                             <Button
@@ -244,8 +262,8 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-        {/* 5 · Previsão de receita */}
-        {(isLoading || forecast) && (
+        {/* 5 · Previsão de receita — oculta quando todos os valores são zero (sem base histórica) */}
+        {(isLoading || (forecast && forecast.months.some((m) => m.projectedRevenue > 0))) && (
           <Card className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Previsão de receita</CardTitle>

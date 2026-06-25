@@ -144,6 +144,14 @@ export interface User {
     branch?: string | null
     /** Vendedor responsável extraído do CSV (opcional). */
     salesperson?: string | null
+    /** Score de recuperabilidade 0-100 (FIX 5.1). */
+    recoveryScore?: number
+    /** Banda qualitativa derivada do score. */
+    recoveryBand?: 'alta' | 'media' | 'baixa'
+    /** Motivos legíveis que explicam o score ao vendedor. */
+    recoveryReasons?: string[]
+    /** expectedValue × (recoveryScore/100) — ordena "quem ligar primeiro". */
+    priorityValue?: number
   }
   
   export interface CustomerRow {

@@ -5,7 +5,7 @@ import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   DollarSign, Users, Package, AlertTriangle, Download, TrendingUp, TrendingDown,
-  Minus, ChevronRight, ChevronDown, Sparkles, ArrowRight,
+  Minus, ChevronRight, ChevronDown, Sparkles, ArrowRight, Filter,
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -68,16 +68,8 @@ const SORT_OPTIONS = [
   { value: 'priority', label: 'Prioridade (valor × recuperação)' },
 ] as const
 
-// Recuperabilidade (FIX 5) — embutida em cada oportunidade pelo ETL. Tipada aqui
-// localmente para não alterar o contrato global em types/index.ts.
-type RecoveryBand = 'alta' | 'media' | 'baixa'
-type OppRecovery = Opportunity & {
-  description?: string
-  recoveryScore?: number
-  recoveryBand?: RecoveryBand
-  recoveryReasons?: string[]
-  priorityValue?: number
-}
+// Campos de recuperabilidade já fazem parte de Opportunity (types/index.ts).
+type RecoveryBand = NonNullable<Opportunity['recoveryBand']>
 
 const RECOVERY_BAND_CONFIG: Record<RecoveryBand, { className: string; label: string }> = {
   alta:  { className: 'bg-success/10 text-success',         label: 'Alta recuperação' },
@@ -130,7 +122,8 @@ export default function InsightsPage() {
   const [filterType, setFilterType] = useState<'all' | Opportunity['type']>('all')
   const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
   const [minValue, setMinValue] = useState('')
-  const [sortBy, setSortBy] = useState<'value' | 'recovery' | 'priority'>('value')
+  const [sortBy, setSortBy] = useState<'value' | 'recovery' | 'priority'>('priority')
+  const [showFilters, setShowFilters] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
@@ -140,16 +133,14 @@ export default function InsightsPage() {
   const { data, isLoading, error, refetch } = useInsights(company?.id, dateRange)
 
   const summary = data?.summary
-  // Campos de recuperabilidade (FIX 5) vêm embutidos em cada oportunidade pelo ETL.
-  // Tipados localmente para não tocar o contrato global em types/index.ts.
-  const opportunities = (data?.opportunities ?? []) as OppRecovery[]
+  const opportunities = data?.opportunities ?? []
   const timeSeries = data?.charts.timeSeries ?? []
   const customerDistribution = data?.charts.customerDistribution ?? []
   const productGaps = data?.charts.productGaps ?? []
   const seasonalityData = data?.charts.seasonality ?? []
 
   const minValueNum = minValue ? parseFloat(minValue) : 0
-  const sortKey = (o: OppRecovery) =>
+  const sortKey = (o: Opportunity) =>
     sortBy === 'recovery' ? (o.recoveryScore ?? 0)
     : sortBy === 'priority' ? (o.priorityValue ?? 0)
     : o.expectedValue
@@ -181,9 +172,14 @@ export default function InsightsPage() {
     setMsgModal({ open: true, text: '', loading: true })
     try {
       const res = await opportunitiesApi.generateMessage(opp.id, customerHash, dateRange)
-      setMsgModal({ open: true, loading: false, text: res.success && res.data ? res.data.message : 'Erro ao gerar mensagem. Tente novamente.' })
+      if (res.success && res.data) {
+        setMsgModal({ open: true, loading: false, text: res.data.message })
+        toast.success('Mensagem gerada.')
+      } else {
+        setMsgModal({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+      }
     } catch {
-      setMsgModal({ open: true, loading: false, text: 'Erro ao gerar mensagem. Tente novamente.' })
+      setMsgModal({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
 
@@ -280,34 +276,52 @@ export default function InsightsPage() {
             <TabsTrigger value="analise" className="text-sm px-4">Análise</TabsTrigger>
           </TabsList>
 
-          {/* ── Oportunidades: filtros visíveis + tabela enxuta com expand ── */}
+          {/* ── Oportunidades: ordenar sempre visível, filtros analíticos colapsáveis ── */}
           <TabsContent value="oportunidades" className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Select value={filterType} onValueChange={(v) => setFilterType(v as typeof filterType)}>
-                <SelectTrigger className="h-9 w-[170px] text-sm bg-card"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os tipos</SelectItem>
-                  {(Object.entries(OPPORTUNITY_TYPE_LABELS) as [Opportunity['type'], string][]).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={filterConfidence} onValueChange={(v) => setFilterConfidence(v as typeof filterConfidence)}>
-                <SelectTrigger className="h-9 w-[150px] text-sm bg-card"><SelectValue placeholder="Confiança" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Toda confiança</SelectItem>
-                  <SelectItem value="high">Alta</SelectItem>
-                  <SelectItem value="medium">Média</SelectItem>
-                  <SelectItem value="low">Baixa</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-9 w-[150px] text-sm bg-card" />
+              {/* Ordenação — controle principal do vendedor */}
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
-                <SelectTrigger className="h-9 w-[220px] text-sm bg-card"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 w-[230px] text-sm bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {/* Filtros analíticos — colapsáveis */}
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('h-9 gap-1.5 text-sm', showFilters && 'border-primary text-primary')}
+                onClick={() => setShowFilters((v) => !v)}
+              >
+                <Filter className="h-3.5 w-3.5" />
+                Filtrar
+                {(filterType !== 'all' || filterConfidence !== 'all' || minValue) && (
+                  <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+                )}
+              </Button>
               <span className="ml-auto text-sm text-muted-foreground tabular-nums">{filteredOpportunities.length} de {opportunities.length}</span>
             </div>
+            {showFilters && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card/60 px-3 py-2.5">
+                <Select value={filterType} onValueChange={(v) => setFilterType(v as typeof filterType)}>
+                  <SelectTrigger className="h-8 w-[160px] text-sm bg-card"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os tipos</SelectItem>
+                    {(Object.entries(OPPORTUNITY_TYPE_LABELS) as [Opportunity['type'], string][]).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={filterConfidence} onValueChange={(v) => setFilterConfidence(v as typeof filterConfidence)}>
+                  <SelectTrigger className="h-8 w-[145px] text-sm bg-card"><SelectValue placeholder="Confiança" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toda confiança</SelectItem>
+                    <SelectItem value="high">Alta</SelectItem>
+                    <SelectItem value="medium">Média</SelectItem>
+                    <SelectItem value="low">Baixa</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-8 w-[145px] text-sm bg-card" />
+              </div>
+            )}
 
             <Card className="rounded-2xl shadow-sm">
               <CardContent className="p-0">
@@ -497,11 +511,11 @@ export default function InsightsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Retenção por safra — dado analítico, fora do fluxo principal do vendedor */}
+            {company?.id && <CohortCard companyId={company.id} />}
           </TabsContent>
         </Tabs>
-
-        {/* Retenção por safra (cohorts) */}
-        {company?.id && <CohortCard companyId={company.id} />}
       </div>
 
       {/* Modal IA */}

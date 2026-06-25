@@ -17,6 +17,13 @@ export interface Opportunity {
   frequency: string | null
   expectedValue: number
   confidence: 'high' | 'medium' | 'low'
+  description?: string
+  branch?: string | null
+  salesperson?: string | null
+  recoveryScore?: number
+  recoveryBand?: 'alta' | 'media' | 'baixa'
+  recoveryReasons?: string[]
+  priorityValue?: number
 }
 
 export interface CustomerRow {
