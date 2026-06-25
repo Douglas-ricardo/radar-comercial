@@ -32,6 +32,10 @@ export function CohortCard({ companyId }: { companyId: string }) {
   if (loading) return <Skeleton className="h-64 w-full rounded-2xl bg-muted" />
   if (!data || data.cohorts.length === 0) return null
 
+  // Safras com menos de 5 clientes não têm retenção estatisticamente confiável — ocultar.
+  const visibleCohorts = data.cohorts.filter(row => row.size >= 5)
+  if (visibleCohorts.length === 0) return null
+
   const cols = Array.from({ length: data.maxOffset + 1 }, (_, i) => i)
 
   return (
@@ -52,7 +56,7 @@ export function CohortCard({ companyId }: { companyId: string }) {
             </tr>
           </thead>
           <tbody>
-            {data.cohorts.map(row => (
+            {visibleCohorts.map(row => (
               <tr key={row.cohort}>
                 <td className="px-2 py-1 font-medium whitespace-nowrap">{row.cohort}</td>
                 <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">{row.size}</td>

@@ -26,3 +26,10 @@ next.user-config.*
 # ── Node / Next ───────────────────────────────────────────────────────────────
 node_modules/
 .next/
+
+# ── CSVs de teste gerados (não versionar) ─────────────────────────────────────
+backend/test_csvs/
+
+# ── Uploads temporários (UUID-named CSVs no backend root) ─────────────────────
+backend/*_vendas.csv
+narrativa.csv

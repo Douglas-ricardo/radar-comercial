@@ -62,11 +62,44 @@ const DATE_RANGE_OPTIONS = [
   { value: '6m', label: 'Últimos 6 meses' }, { value: '12m', label: 'Último ano' },
 ]
 
+const SORT_OPTIONS = [
+  { value: 'value',    label: 'Maior valor' },
+  { value: 'recovery', label: 'Mais recuperável' },
+  { value: 'priority', label: 'Prioridade (valor × recuperação)' },
+] as const
+
+// Recuperabilidade (FIX 5) — embutida em cada oportunidade pelo ETL. Tipada aqui
+// localmente para não alterar o contrato global em types/index.ts.
+type RecoveryBand = 'alta' | 'media' | 'baixa'
+type OppRecovery = Opportunity & {
+  description?: string
+  recoveryScore?: number
+  recoveryBand?: RecoveryBand
+  recoveryReasons?: string[]
+  priorityValue?: number
+}
+
+const RECOVERY_BAND_CONFIG: Record<RecoveryBand, { className: string; label: string }> = {
+  alta:  { className: 'bg-success/10 text-success',         label: 'Alta recuperação' },
+  media: { className: 'bg-warning/10 text-warning',         label: 'Média recuperação' },
+  baixa: { className: 'bg-muted text-muted-foreground',     label: 'Baixa recuperação' },
+}
+
 // ─── Sub-componentes ─────────────────────────────────────────────────────────
 
 function ConfidenceBadge({ confidence }: { confidence: Opportunity['confidence'] }) {
   const { className, label } = CONFIDENCE_CONFIG[confidence]
   return <Badge className={cn('text-xs font-medium border-0', className)}>{label}</Badge>
+}
+
+function RecoveryBadge({ band, score }: { band?: RecoveryBand; score?: number }) {
+  if (!band || score === undefined) return null
+  const { className, label } = RECOVERY_BAND_CONFIG[band]
+  return (
+    <Badge className={cn('text-xs font-medium border-0 tabular-nums', className)} title={label}>
+      {score} · {band === 'media' ? 'média' : band}
+    </Badge>
+  )
 }
 
 function TrendCell({ trend }: { trend: CustomerRow['trend'] }) {
@@ -97,6 +130,7 @@ export default function InsightsPage() {
   const [filterType, setFilterType] = useState<'all' | Opportunity['type']>('all')
   const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
   const [minValue, setMinValue] = useState('')
+  const [sortBy, setSortBy] = useState<'value' | 'recovery' | 'priority'>('value')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
@@ -106,19 +140,27 @@ export default function InsightsPage() {
   const { data, isLoading, error, refetch } = useInsights(company?.id, dateRange)
 
   const summary = data?.summary
-  const opportunities = data?.opportunities ?? []
+  // Campos de recuperabilidade (FIX 5) vêm embutidos em cada oportunidade pelo ETL.
+  // Tipados localmente para não tocar o contrato global em types/index.ts.
+  const opportunities = (data?.opportunities ?? []) as OppRecovery[]
   const timeSeries = data?.charts.timeSeries ?? []
   const customerDistribution = data?.charts.customerDistribution ?? []
   const productGaps = data?.charts.productGaps ?? []
   const seasonalityData = data?.charts.seasonality ?? []
 
   const minValueNum = minValue ? parseFloat(minValue) : 0
-  const filteredOpportunities = opportunities.filter((o) => {
-    if (filterType !== 'all' && o.type !== filterType) return false
-    if (filterConfidence !== 'all' && o.confidence !== filterConfidence) return false
-    if (minValueNum > 0 && o.expectedValue < minValueNum) return false
-    return true
-  })
+  const sortKey = (o: OppRecovery) =>
+    sortBy === 'recovery' ? (o.recoveryScore ?? 0)
+    : sortBy === 'priority' ? (o.priorityValue ?? 0)
+    : o.expectedValue
+  const filteredOpportunities = opportunities
+    .filter((o) => {
+      if (filterType !== 'all' && o.type !== filterType) return false
+      if (filterConfidence !== 'all' && o.confidence !== filterConfidence) return false
+      if (minValueNum > 0 && o.expectedValue < minValueNum) return false
+      return true
+    })
+    .sort((a, b) => sortKey(b) - sortKey(a))
 
   // Camada 1 — achados em palavras (derivados dos dados)
   type Finding = { tone: string; serif?: boolean; value: string; text: string; cta: string; to: string }
@@ -258,6 +300,12 @@ export default function InsightsPage() {
                 </SelectContent>
               </Select>
               <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-9 w-[150px] text-sm bg-card" />
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                <SelectTrigger className="h-9 w-[220px] text-sm bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
               <span className="ml-auto text-sm text-muted-foreground tabular-nums">{filteredOpportunities.length} de {opportunities.length}</span>
             </div>
 
@@ -273,6 +321,7 @@ export default function InsightsPage() {
                       <TableRow className="hover:bg-transparent bg-muted/30">
                         <TableHead className="pl-6 h-10 text-xs uppercase tracking-wider text-muted-foreground">Cliente</TableHead>
                         <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right">Potencial</TableHead>
+                        <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right pr-2">Recuperação</TableHead>
                         <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right pr-2">Confiança</TableHead>
                         <TableHead className="h-10 w-10 pr-6" />
                       </TableRow>
@@ -283,18 +332,32 @@ export default function InsightsPage() {
                           <TableRow className="cursor-pointer transition-colors hover:bg-accent/50" onClick={() => setExpanded(expanded === opp.id ? null : opp.id)}>
                             <TableCell className="pl-6 font-medium">{opp.customer}</TableCell>
                             <TableCell className="text-right font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</TableCell>
+                            <TableCell className="text-right pr-2"><RecoveryBadge band={opp.recoveryBand} score={opp.recoveryScore} /></TableCell>
                             <TableCell className="text-right pr-2"><ConfidenceBadge confidence={opp.confidence} /></TableCell>
                             <TableCell className="w-10 pr-6"><ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform ml-auto', expanded === opp.id && 'rotate-180')} /></TableCell>
                           </TableRow>
                           {expanded === opp.id && (
                             <TableRow className="bg-muted/20 hover:bg-muted/20">
-                              <TableCell colSpan={4} className="px-6 py-4">
+                              <TableCell colSpan={5} className="px-6 py-4">
                                 <div className="grid gap-3 sm:grid-cols-4 text-sm">
                                   <div><p className="text-xs text-muted-foreground">Produto</p><p className="font-medium">{opp.product ?? 'Geral'}</p></div>
                                   <div><p className="text-xs text-muted-foreground">Tipo</p><p className="font-medium">{OPPORTUNITY_TYPE_LABELS[opp.type]}</p></div>
                                   <div><p className="text-xs text-muted-foreground">Última compra</p><p className="font-medium tabular-nums">{opp.lastPurchase ? new Date(opp.lastPurchase).toLocaleDateString('pt-BR') : '—'}</p></div>
                                   <div><p className="text-xs text-muted-foreground">Frequência</p><p className="font-medium">{opp.frequency ?? 'Irregular'}</p></div>
                                 </div>
+                                {(opp.recoveryReasons?.length || opp.priorityValue !== undefined) && (
+                                  <div className="mt-3 rounded-lg bg-card/60 p-3">
+                                    <p className="text-xs text-muted-foreground">
+                                      Recuperabilidade {opp.recoveryScore ?? '—'}/100
+                                      {opp.priorityValue !== undefined && <> · prioridade {formatCurrency(opp.priorityValue)}</>}
+                                    </p>
+                                    {opp.recoveryReasons && opp.recoveryReasons.length > 0 && (
+                                      <ul className="mt-1 list-disc pl-4 text-sm text-muted-foreground leading-relaxed">
+                                        {opp.recoveryReasons.map((r, i) => <li key={i}>{r}</li>)}
+                                      </ul>
+                                    )}
+                                  </div>
+                                )}
                                 {opp.description && <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{opp.description}</p>}
                                 {canUseAI && (
                                   <Button size="sm" variant="outline" className="mt-4 gap-1.5" onClick={(e) => { e.stopPropagation(); handleGenerateMessage(opp) }}>

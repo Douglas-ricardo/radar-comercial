@@ -409,7 +409,14 @@ export default function CarteiraPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {COLUMNS.map((col) => {
-                  const items = byStatus[col.status]
+                  // Cada coluna ordena pela métrica do estágio: "a contatar" por prioridade
+                  // (valor × recuperabilidade — para quem ligar primeiro); colunas de desfecho
+                  // por valor (recuperabilidade não tem significado após ganho/perdido).
+                  const stageKey = (o: CarteiraOpportunity) =>
+                    col.status === 'to_contact'
+                      ? ((o as { priorityValue?: number }).priorityValue ?? o.expectedValue)
+                      : o.expectedValue
+                  const items = [...byStatus[col.status]].sort((a, b) => stageKey(b) - stageKey(a))
                   return (
                     <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
                       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
@@ -434,6 +441,8 @@ export default function CarteiraPage() {
                               product={opp.product}
                               frequency={opp.frequency}
                               confidence={opp.confidence}
+                              recoveryScore={(opp as { recoveryScore?: number }).recoveryScore}
+                              recoveryBand={(opp as { recoveryBand?: 'alta' | 'media' | 'baixa' }).recoveryBand}
                               onOpen={() => setSelectedOpp(opp)}
                               onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
                             />

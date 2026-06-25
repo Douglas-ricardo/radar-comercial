@@ -20,11 +20,30 @@ router = APIRouter(prefix="/api/insights", tags=["Insights"])
 
 VALID_DATE_RANGES = {"1m", "3m", "6m", "12m"}
 
+# Critérios de ordenação da lista de oportunidades (Passo 5 do FIX 5).
+# value = maior valor recuperável (default, preserva ordem do ETL);
+# recovery = mais recuperável (recoveryScore); priority = valor × recuperação.
+_OPP_SORT_KEYS = {
+    "value": lambda o: o.get("expectedValue") or 0.0,
+    "recovery": lambda o: o.get("recoveryScore") or 0,
+    "priority": lambda o: o.get("priorityValue") or 0.0,
+}
+
+
+def _sort_opportunities(insights_data: dict, sort: str) -> dict:
+    """Reordena a lista de oportunidades pelo critério escolhido (não muta o original)."""
+    opps = insights_data.get("opportunities") or []
+    if sort != "value" and isinstance(opps, list) and opps:
+        ordered = sorted(opps, key=_OPP_SORT_KEYS[sort], reverse=True)
+        insights_data = {**insights_data, "opportunities": ordered}
+    return insights_data
+
 
 @router.get("/{company_id}")
 def get_insights(
     company_id: str,
     date_range: str = Query("6m", alias="date_range", description="Período de análise (1m, 3m, 6m, 12m)"),
+    sort: str = Query("value", description="Ordenação das oportunidades: value | recovery | priority"),
     token_data=Depends(get_current_user_and_company),
     db: Session = Depends(get_db_session),
 ):
@@ -37,13 +56,16 @@ def get_insights(
             detail=f"Período inválido: '{date_range}'. Use: 1m, 3m, 6m ou 12m.",
         )
 
+    if sort not in _OPP_SORT_KEYS:
+        sort = "value"
+
     cache_key = f"insights:{company_id}:{date_range}"
 
     try:
         cached = redis_client.get(cache_key)
         if cached:
             logger.info("insights.cache.hit", extra={"company_id": company_id, "date_range": date_range})
-            return {"success": True, "data": json.loads(cached)}
+            return {"success": True, "data": _sort_opportunities(json.loads(cached), sort)}
     except RedisError as exc:
         logger.warning("insights.redis.get_error", extra={"error": str(exc)})
 
@@ -66,11 +88,12 @@ def get_insights(
     }
 
     try:
+        # Cacheia a ordem base (value); a ordenação por sort é aplicada na resposta.
         redis_client.setex(cache_key, 900, json.dumps(insights_data, default=str))
     except RedisError as exc:
         logger.warning("insights.redis.set_error", extra={"error": str(exc)})
 
-    return {"success": True, "data": insights_data}
+    return {"success": True, "data": _sort_opportunities(insights_data, sort)}
 
 
 _RISK_ORDER = {"high": 3, "medium": 2, "low": 1, "none": 0}

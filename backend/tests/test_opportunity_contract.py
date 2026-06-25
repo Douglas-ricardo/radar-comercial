@@ -17,25 +17,28 @@ REQUIRED_KEYS = {"id", "customerHash", "customer", "product", "type",
 @pytest.fixture
 def sample_df():
     """
-    DataFrame com clientes churned relativo ao max_date do próprio arquivo.
-    Com a guarda de defasagem, reference_date = file_max quando o arquivo é antigo.
-    Portanto, clientes inativos devem ter última compra > 60 dias ANTES do file_max.
+    DataFrame com cliente churned relativo ao max_date do próprio arquivo, sob a
+    régua única do FIX 4 (classify_customer_status). Com a guarda de defasagem,
+    reference_date = file_max quando o arquivo é antigo.
+
+    Cliente A tem cadência mensal (4 compras, ciclo ~30d) e depois silêncio: a
+    última compra fica 120 dias antes do file_max (> 1.5× o ciclo) → churned.
+    Cliente B compra no file_max → active (não vira oportunidade).
     """
-    # active_purchase será o file_max real (maior data no df).
-    # limit_active = active_purchase - 60d.
-    # Para churned: última compra deve ser < active_purchase - 60d.
-    # Usamos 80d de margem para garantir que churned_purchase < limit_active.
-    active_purchase = date.today() - timedelta(days=90)    # file_max real do df
-    churned_purchase = active_purchase - timedelta(days=80) # 80d antes → inativo há > 60d → churned
+    active_purchase = date.today() - timedelta(days=90)     # file_max real do df
+    a_last = active_purchase - timedelta(days=120)           # parou há 120d (>> ciclo 30d)
     return pl.DataFrame({
         "date": [
-            churned_purchase, churned_purchase - timedelta(days=30),  # Cliente A (churned)
-            active_purchase,                                            # Cliente B (ativo)
+            a_last,
+            a_last - timedelta(days=30),
+            a_last - timedelta(days=60),
+            a_last - timedelta(days=90),    # Cliente A — 4 compras mensais (churned)
+            active_purchase,                # Cliente B (ativo)
         ],
-        "customer_id": ["Cliente A", "Cliente A", "Cliente B"],
-        "product_id": ["Produto X", "Produto X", "Produto Y"],
-        "revenue": [500.0, 300.0, 800.0],
-        "qty": [1.0, 1.0, 2.0],
+        "customer_id": ["Cliente A", "Cliente A", "Cliente A", "Cliente A", "Cliente B"],
+        "product_id": ["Produto X", "Produto X", "Produto X", "Produto X", "Produto Y"],
+        "revenue": [500.0, 300.0, 400.0, 350.0, 800.0],
+        "qty": [1.0, 1.0, 1.0, 1.0, 2.0],
     })
 
 

@@ -362,9 +362,234 @@ def _max_date(df: pl.DataFrame) -> date:
     return raw.date() if isinstance(raw, datetime) else raw
 
 
+# ─── Fonte de verdade: status e valor recuperável do cliente ──────────────────
+
+# Limiares de status como múltiplos do ciclo efetivo do cliente.
+_AT_RISK_MULT = 1.0   # recency > 1.0× ciclo  → atrasado (proativo)
+_CHURNED_MULT = 1.5   # recency > 1.5× ciclo  → sumiu (win-back)
+_MIN_PURCHASES_FOR_RHYTHM = 3  # abaixo disso, usa ciclo global, não o individual
+
+
+def effective_cycle_days(avg_interval_days: float, frequency: int, cycle_days: int) -> float:
+    """Ciclo do PRÓPRIO cliente quando há ritmo confiável; senão, o global da empresa."""
+    if frequency >= _MIN_PURCHASES_FOR_RHYTHM and avg_interval_days and avg_interval_days > 0:
+        return float(avg_interval_days)
+    return float(cycle_days)
+
+
+def recoverable_value(total_revenue: float, span_days: int, eff_cycle: float) -> float:
+    """
+    Valor recuperável = receita por CICLO típico do cliente (fluxo que volta ao reativar),
+    não ticket avulso. Substitui avg_ticket / total_rev*0.2 / total_rev/frequency.
+    """
+    if total_revenue <= 0:
+        return 0.0
+    n_cycles = max(1, round(span_days / eff_cycle)) if eff_cycle > 0 else 1
+    return round(total_revenue / n_cycles, 2)
+
+
+def classify_customer_status(
+    recency_days: int,
+    avg_interval_days: float,
+    frequency: int,
+    total_revenue: float,
+    span_days: int,
+    cycle_days: int = 90,
+) -> dict:
+    """
+    ÚNICA fonte de verdade para status comercial e valor recuperável.
+    Consumida por generate_dynamic_insights E build_customer_profiles.
+
+    Retorna:
+      status: "active" | "at_risk" | "churned"
+      expected_value: receita por ciclo (régua única)
+      eff_cycle: ciclo efetivo usado (para debug/exibição)
+      days_overdue: dias além do ciclo efetivo (0 se em dia)
+    """
+    eff_cycle = effective_cycle_days(avg_interval_days, frequency, cycle_days)
+    expected_value = recoverable_value(total_revenue, span_days, eff_cycle)
+    days_overdue = max(0, int(round(recency_days - eff_cycle)))
+
+    if recency_days > eff_cycle * _CHURNED_MULT:
+        status = "churned"
+    elif recency_days > eff_cycle * _AT_RISK_MULT:
+        status = "at_risk"
+    else:
+        status = "active"
+
+    return {
+        "status": status,
+        "expected_value": expected_value,
+        "eff_cycle": round(eff_cycle, 1),
+        "days_overdue": days_overdue,
+    }
+
+
+# ─── Score de recuperabilidade (regras, explicável — NÃO é ML/probabilidade) ──
+
+# Pesos do recovery_score (somam 100). HIPÓTESE versionada — calibrar com dado real.
+_RS_W_RECENCY     = 40  # recência relativa ao ciclo (fator dominante)
+_RS_W_REGULARITY  = 25  # regularidade do ritmo de compra
+_RS_W_TREND       = 20  # tendência antes de sumir (já caía vs sumiu saudável)
+_RS_W_DEPTH       = 15  # profundidade da relação (nº compras + span)
+
+_RS_HIGH = 70  # >= alta
+_RS_MED  = 40  # >= média ; abaixo = baixa
+
+# Divisor da curva de recência: f_recency cai a 0 quando recency = (1 + span) ciclos.
+# Maior = decaimento mais lento (segura melhor a faixa 1–2.5 ciclos, ainda recuperável).
+_RS_RECENCY_SPAN = 3.5
+
+# Janela (dias) para medir a tendência ANTES da última compra (pré-saída).
+_RS_TREND_WINDOW = 90
+
+
+def purchase_regularity(dates: list) -> float:
+    """
+    Regularidade do ritmo de compra, em [0, 1] (1 = perfeitamente regular).
+    Baseado no coeficiente de variação (CV) dos intervalos entre compras consecutivas:
+    regularity = 1 / (1 + CV), onde CV = desvio_padrão(gaps) / média(gaps).
+    < 2 compras → 0.0 (sem ritmo aferível).
+    """
+    if not dates or len(dates) < 2:
+        return 0.0
+    gaps = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates))]
+    gaps = [g for g in gaps if g > 0]
+    if len(gaps) < 1:
+        return 0.0
+    mean = sum(gaps) / len(gaps)
+    if mean <= 0:
+        return 0.0
+    var = sum((g - mean) ** 2 for g in gaps) / len(gaps)
+    std = var ** 0.5
+    cv = std / mean
+    return round(1.0 / (1.0 + cv), 4)
+
+
+def recovery_score(
+    recency_days: int,
+    eff_cycle: float,
+    regularity: float,      # 0..1 (purchase_regularity)
+    rev_recent: float,      # receita na janela ANTES da última compra (recente)
+    rev_before: float,      # receita na janela anterior a essa (base de comparação)
+    frequency: int,
+    span_days: int,
+) -> dict:
+    """
+    Score de recuperabilidade 0-100 + faixa + motivos. Baseado em regras, transparente.
+    NÃO é probabilidade estatística — é um índice ordenável e explicável.
+
+    A tendência (rev_recent vs rev_before) mede o comportamento ANTES de sumir — se o
+    cliente já declinava enquanto ainda comprava (recuperação difícil) ou sumiu saudável.
+    """
+    reasons = []
+
+    # Fator 1 — recência relativa ao ciclo. 1.0 no ciclo, decaimento suave por múltiplos;
+    # zera só perto de ~(1 + _RS_RECENCY_SPAN) ciclos. Segura a faixa 1–2.5 (ainda recuperável).
+    if eff_cycle > 0:
+        ratio = recency_days / eff_cycle           # 1.0 = saiu há 1 ciclo
+        f_recency = max(0.0, min(1.0, 1.0 - (max(0.0, ratio - 1.0) / _RS_RECENCY_SPAN)))
+    else:
+        f_recency = 0.0
+    if f_recency >= 0.6:
+        reasons.append("saiu há pouco tempo relativo ao ciclo dele")
+    elif f_recency <= 0.25:
+        reasons.append("sumiu há vários ciclos (difícil reativar)")
+
+    # Fator 2 — regularidade (já 0..1).
+    f_reg = max(0.0, min(1.0, regularity))
+    if f_reg >= 0.7:
+        reasons.append("cliente comprava em ritmo regular")
+    elif f_reg <= 0.3 and frequency >= 2:
+        reasons.append("padrão de compra irregular")
+
+    # Fator 3 — tendência pré-saída. Caindo antes de sumir = pior; sumiu saudável = melhor.
+    if rev_before > 0:
+        change = (rev_recent - rev_before) / rev_before
+        f_trend = max(0.0, min(1.0, 0.5 + change))  # estável=0.5, queda<0.5, alta>0.5
+    else:
+        f_trend = 0.5  # sem base de comparação → neutro
+    if f_trend <= 0.3:
+        reasons.append("já vinha desacelerando antes de parar")
+    elif f_trend >= 0.7:
+        reasons.append("sumiu sem dar sinais (vinha saudável)")
+
+    # Fator 4 — profundidade da relação (compras + span normalizados, saturando).
+    f_depth = max(0.0, min(1.0, (min(frequency, 12) / 12) * 0.6 + (min(span_days, 540) / 540) * 0.4))
+    if f_depth >= 0.7:
+        reasons.append("relação longa e consolidada")
+
+    score = (
+        _RS_W_RECENCY    * f_recency +
+        _RS_W_REGULARITY * f_reg +
+        _RS_W_TREND      * f_trend +
+        _RS_W_DEPTH      * f_depth
+    )
+    score = int(round(max(0.0, min(100.0, score))))
+
+    band = "alta" if score >= _RS_HIGH else "media" if score >= _RS_MED else "baixa"
+
+    return {
+        "recoveryScore": score,
+        "recoveryBand": band,            # "alta" | "media" | "baixa"
+        "recoveryReasons": reasons[:3],  # até 3 motivos, ordem de relevância
+        "recoveryFactors": {             # para debug/tooltip/transparência
+            "recency": round(f_recency, 3),
+            "regularity": round(f_reg, 3),
+            "trend": round(f_trend, 3),
+            "depth": round(f_depth, 3),
+        },
+    }
+
+
+def _dates_by_customer(df: pl.DataFrame) -> dict:
+    """
+    Mapa customer_id → lista ordenada de datas DISTINTAS de compra. Fonte única para
+    a regularidade (purchase_regularity), consumida por insights e profiles. O(n).
+    """
+    dates_agg = (
+        df.select(["customer_id", "date"]).unique()
+        .group_by("customer_id")
+        .agg(pl.col("date").sort().alias("_dates"))
+    )
+    return {r["customer_id"]: list(r["_dates"]) for r in dates_agg.iter_rows(named=True)}
+
+
+def _pre_lpd_trend_maps(df: pl.DataFrame, window: int = _RS_TREND_WINDOW) -> tuple[dict, dict]:
+    """
+    Tendência pré-saída em BATCH (O(n), sem filtro por cliente em loop). Para cada cliente,
+    com base na sua última compra (LPD):
+      rev_recent = soma revenue em [LPD - window, LPD]
+      rev_before = soma revenue em [LPD - 2*window, LPD - window)
+    Fonte única alimentada pela lista de oportunidades E pelo perfil → recovery_score idêntico.
+    Retorna (rev_recent_map, rev_before_map).
+    """
+    lpd = df.group_by("customer_id").agg(pl.col("date").max().alias("_lpd"))
+    j = (
+        df.join(lpd, on="customer_id", how="left")
+        .with_columns([
+            pl.col("_lpd").dt.offset_by(f"-{window}d").alias("_w1"),
+            pl.col("_lpd").dt.offset_by(f"-{2 * window}d").alias("_w2"),
+        ])
+        .group_by("customer_id")
+        .agg([
+            pl.when((pl.col("date") >= pl.col("_w1")) & (pl.col("date") <= pl.col("_lpd")))
+              .then(pl.col("revenue")).otherwise(0.0).sum().alias("rev_recent"),
+            pl.when((pl.col("date") >= pl.col("_w2")) & (pl.col("date") < pl.col("_w1")))
+              .then(pl.col("revenue")).otherwise(0.0).sum().alias("rev_before"),
+        ])
+    )
+    recent_map: dict = {}
+    before_map: dict = {}
+    for r in j.iter_rows(named=True):
+        recent_map[r["customer_id"]] = float(r["rev_recent"] or 0.0)
+        before_map[r["customer_id"]] = float(r["rev_before"] or 0.0)
+    return recent_map, before_map
+
+
 # ─── Insights computation ─────────────────────────────────────────────────────
 
-def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
+def generate_dynamic_insights(df: pl.DataFrame, date_range: str, cycle_days: int = 90) -> dict | None:
     """
     Computes dashboard insights for a single date range from an in-memory DataFrame.
     Returns None when there is no data for the requested period.
@@ -406,39 +631,103 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
     unique_customers = int(df_current["customer_id"].n_unique())
     unique_products = int(df_current["product_id"].n_unique())
 
-    # Churned: clientes que não compram há mais de 60 dias relativo a reference_date.
-    # reference_date = hoje se o arquivo é recente (≤7d), senão = max_date do arquivo.
-    # Usa o df completo para detectar todos os clientes inativos — não só os do período atual.
-    limit_active = reference_date - timedelta(days=60)
-
-    # Enriquecimento por cliente: último produto, n_purchases, avg_ticket, avg_interval
+    # ── Status comercial (fonte de verdade única) ───────────────────────────
+    # classify_customer_status decide status e valor recuperável para CADA cliente
+    # do histórico completo (não só do período atual). Oportunidade = at_risk|churned;
+    # `active` nunca entra. Mesma régua consumida por build_customer_profiles.
     last_product_df = (
         df.sort("date", descending=True)
         .group_by("customer_id")
         .first()
         .select(["customer_id", pl.col("product_id").alias("last_product")])
     )
-    customer_agg = df.group_by("customer_id").agg([
-        pl.col("date").max().alias("ultima_compra"),
-        pl.col("date").min().alias("primeira_compra"),
-        pl.col("revenue").sum().alias("valor_total"),
-        pl.col("revenue").count().alias("n_purchases"),
-        pl.col("revenue").mean().alias("avg_ticket"),
-    ])
-    churned_df = (
-        customer_agg
-        .filter(pl.col("ultima_compra") < pl.lit(limit_active).cast(pl.Date))
+    customer_agg = (
+        df.group_by("customer_id").agg([
+            pl.col("date").max().alias("ultima_compra"),
+            pl.col("date").min().alias("primeira_compra"),
+            pl.col("revenue").sum().alias("valor_total"),
+            pl.col("date").n_unique().alias("n_purchases"),
+        ])
         .join(last_product_df, on="customer_id", how="left")
     )
 
-    # KPI lost_revenue: receita dos clientes churned dentro do período atual
-    churned_names = set(churned_df["customer_id"].to_list())
-    lost_revenue_current = (
-        df_current
-        .filter(pl.col("customer_id").is_in(list(churned_names)))
-        ["revenue"].sum() or 0.0
-    ) if churned_names and not df_current.is_empty() else 0.0
-    lost_revenue = float(lost_revenue_current)
+    # Sinais do recovery_score (fonte única): regularidade dos gaps + tendência pré-saída.
+    dates_by_customer = _dates_by_customer(df)
+    _rev_recent_map, _rev_before_map = _pre_lpd_trend_maps(df)
+
+    def _frequency_label(n_purchases: int, primeira_compra, ultima_compra) -> str:
+        if n_purchases <= 1 or primeira_compra is None or ultima_compra is None:
+            return "Esporádico"
+        span = (ultima_compra - primeira_compra).days
+        avg_days = span / (n_purchases - 1) if n_purchases > 1 else span
+        if avg_days < 14:
+            return "Semanal"
+        if avg_days < 21:
+            return "Quinzenal"
+        if avg_days < 45:
+            return "Mensal"
+        if avg_days < 75:
+            return "Bimestral"
+        return "Esporádico"
+
+    opportunities = []
+    churned_names: set = set()
+    lost_revenue = 0.0
+    for row in customer_agg.iter_rows(named=True):
+        ultima = row["ultima_compra"]
+        primeira = row["primeira_compra"]
+        n_purchases = int(row["n_purchases"] or 1)
+        valor_total = float(row["valor_total"] or 0.0)
+        recency = (reference_date - ultima).days if ultima else 0
+        span = (ultima - primeira).days if (ultima and primeira) else 0
+        avg_interval = span / (n_purchases - 1) if n_purchases > 1 and span > 0 else 0.0
+        st = classify_customer_status(
+            recency, avg_interval, n_purchases, valor_total, span, cycle_days=cycle_days
+        )
+        if st["status"] == "churned":
+            churned_names.add(row["customer_id"])
+            lost_revenue += st["expected_value"]
+        if st["status"] not in ("at_risk", "churned"):
+            continue
+        # confidence derivado de sinal real (histórico), não string fixa
+        confidence = "high" if n_purchases >= 5 else "medium" if n_purchases >= 3 else "low"
+        # Recuperabilidade (mesma função/sinais do profile → score idêntico).
+        reg = purchase_regularity(dates_by_customer.get(row["customer_id"], []))
+        rs = recovery_score(
+            recency, st["eff_cycle"], reg,
+            _rev_recent_map.get(row["customer_id"], 0.0),
+            _rev_before_map.get(row["customer_id"], 0.0),
+            n_purchases, span,
+        )
+        priority_value = round(st["expected_value"] * (rs["recoveryScore"] / 100), 2)
+        opportunities.append({
+            "id": str(uuid.uuid4()),
+            "customerHash": hashlib.md5(
+                normalize_customer_name(str(row["customer_id"])).encode("utf-8")
+            ).hexdigest(),
+            "customer": display_map.get(row["customer_id"], row["customer_id"]),
+            "product": str(row["last_product"]) if row.get("last_product") else "Produto não identificado",
+            "type": "declining_customer" if st["status"] == "at_risk" else "missing_sale",
+            "lastPurchase": ultima.isoformat() if ultima else None,
+            "daysInactive": recency,
+            "frequency": _frequency_label(n_purchases, primeira, ultima),
+            "expectedValue": st["expected_value"],
+            "confidence": confidence,
+            "recoveryScore": rs["recoveryScore"],
+            "recoveryBand": rs["recoveryBand"],
+            "recoveryReasons": rs["recoveryReasons"],
+            "priorityValue": priority_value,
+            "_sort": st["expected_value"],
+        })
+    # Ordena por valor recuperável desc (não por valor_total bruto)
+    opportunities.sort(key=lambda o: o["_sort"], reverse=True)
+    opportunities = opportunities[:15]
+    for o in opportunities:
+        o.pop("_sort", None)
+
+    # KPI lostRevenue: soma do valor recuperável dos clientes churned (histórico completo),
+    # não a receita do período. timeSeries.perdida (abaixo) segue por período.
+    lost_revenue = round(lost_revenue, 2)
     lost_rate = round((lost_revenue / total_revenue) * 100, 1) if total_revenue > 0 else 0.0
 
     # ── Customer distribution ─────────────────────────────────────────────────
@@ -486,42 +775,6 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str) -> dict | None:
             "perdida": float(row["perdida"]),
         }
         for row in time_series_df.iter_rows(named=True)
-    ]
-
-    # ── Opportunities ─────────────────────────────────────────────────────────
-    def _frequency_label(n_purchases: int, primeira_compra, ultima_compra) -> str:
-        if n_purchases <= 1 or primeira_compra is None or ultima_compra is None:
-            return "Esporádico"
-        span = (ultima_compra - primeira_compra).days
-        avg_days = span / (n_purchases - 1) if n_purchases > 1 else span
-        if avg_days < 14:
-            return "Semanal"
-        if avg_days < 21:
-            return "Quinzenal"
-        if avg_days < 45:
-            return "Mensal"
-        if avg_days < 75:
-            return "Bimestral"
-        return "Esporádico"
-
-    opportunities = [
-        {
-            "id": str(uuid.uuid4()),
-            "customerHash": hashlib.md5(
-                normalize_customer_name(str(row["customer_id"])).encode("utf-8")
-            ).hexdigest(),
-            "customer": display_map.get(row["customer_id"], row["customer_id"]),
-            "product": str(row["last_product"]) if row.get("last_product") else "Produto não identificado",
-            "type": "declining_customer",
-            "lastPurchase": row["ultima_compra"].isoformat() if row["ultima_compra"] else None,
-            "daysInactive": (reference_date - row["ultima_compra"]).days if row["ultima_compra"] else 0,
-            "frequency": _frequency_label(
-                row.get("n_purchases", 1), row.get("primeira_compra"), row["ultima_compra"]
-            ),
-            "expectedValue": round(float(row.get("avg_ticket", 0) or 0), 2),
-            "confidence": "high" if row["valor_total"] > 1000 else "medium",
-        }
-        for row in churned_df.sort("valor_total", descending=True).head(15).iter_rows(named=True)
     ]
 
     # ── Seasonality — month vs. period average ───────────────────────────────
@@ -612,7 +865,14 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
     display_map = _build_display_map(df)
     contact_map = _build_contact_map(df)
     extra_map = _build_extra_fields_map(df)
+    dates_by_customer = _dates_by_customer(df)  # regularidade (fonte única do recovery_score)
+    rev_recent_map, rev_before_map = _pre_lpd_trend_maps(df)  # tendência pré-saída (fonte única)
     max_date = _max_date(df)
+    # Mesma base de recência que generate_dynamic_insights (guard de defasagem):
+    # hoje se o arquivo é recente (≤7d), senão o file_max. Garante status/recovery
+    # IDÊNTICOS entre o perfil e a lista de oportunidades, inclusive em arquivos "live".
+    today = datetime.now().date()
+    reference_date = today if (today - max_date).days <= 7 else max_date
     total_company_revenue = float(df["revenue"].sum() or 0.0)
 
     # ── Batch aggregation for all customers ──────────────────────────────────
@@ -695,13 +955,17 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
         total_rev = float(row["total_revenue"] or 0.0)
         last_date = row["last_purchase_date"]
         first_date = row["first_purchase_date"]
-        recency_days = (max_date - last_date).days if last_date else 0
+        recency_days = (reference_date - last_date).days if last_date else 0
         frequency = int(row["frequency"] or 1)
         percentage = round((total_rev / total_company_revenue) * 100, 1) if total_company_revenue > 0 else 0.0
 
         span_days = (last_date - first_date).days if (last_date and first_date) else 0
         avg_interval_days = round(span_days / (frequency - 1), 1) if frequency > 1 and span_days > 0 else 0.0
         churn = assess_churn_risk(recency_days, avg_interval_days, frequency, cycle_days=cycle_days)
+        # Régua única: mesmo status/valor recuperável que a lista de oportunidades.
+        st = classify_customer_status(
+            recency_days, avg_interval_days, frequency, total_rev, span_days, cycle_days=cycle_days
+        )
 
         r_score = 5 if recency_days <= 30 else 4 if recency_days <= 60 else 3 if recency_days <= 90 else 2 if recency_days <= 180 else 1
         f_score = 5 if frequency >= 10 else 4 if frequency >= 5 else 3 if frequency >= 3 else 2 if frequency >= 2 else 1
@@ -720,6 +984,17 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
         elif rev_curr < rev_prev * 0.9:     trend = "down"
         else:                               trend = "stable"
 
+        # Recuperabilidade (mesma função/sinais da lista de oportunidades → score idêntico).
+        # Tendência pré-saída (rev_recent/rev_before), não os trimestres de calendário.
+        reg = purchase_regularity(dates_by_customer.get(cust_name, []))
+        rs = recovery_score(
+            recency_days, st["eff_cycle"], reg,
+            rev_recent_map.get(cust_name, 0.0),
+            rev_before_map.get(cust_name, 0.0),
+            frequency, span_days,
+        )
+        priority_value = round(st["expected_value"] * (rs["recoveryScore"] / 100), 2)
+
         # Top products (pre-computed, no per-customer filter)
         raw_prods = top_prods_by_customer.get(cust_name, [])
         top_products = [
@@ -729,22 +1004,25 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
 
         monthly_revenue = monthly_by_customer.get(cust_name, [])
 
+        # Alertas e expectedValue seguem a régua única (st), não o segmento RFV —
+        # garante MESMO expectedValue que a lista de oportunidades para o mesmo cliente.
+        confidence = "high" if frequency >= 5 else "medium" if frequency >= 3 else "low"
         alerts = []
-        if segment == "at_risk":
+        if st["status"] == "at_risk":
             alerts.append({
                 "id": str(uuid.uuid4()),
                 "type": "declining_customer",
-                "description": f"Cliente não compra há {recency_days} dias. Risco alto de perda (Churn).",
-                "expectedValue": float(total_rev / max(frequency, 1)),
-                "confidence": "high",
+                "description": f"Cliente atrasado há {st['days_overdue']} dias além do ciclo típico. Risco de perda (Churn).",
+                "expectedValue": st["expected_value"],
+                "confidence": confidence,
             })
-        elif segment == "lost":
+        elif st["status"] == "churned":
             alerts.append({
                 "id": str(uuid.uuid4()),
                 "type": "missing_sale",
-                "description": "Cliente perdido. Tentar campanha de win-back agressiva com desconto.",
-                "expectedValue": float(total_rev * 0.2),
-                "confidence": "medium",
+                "description": "Cliente sumiu (sem compra há mais de 1,5× o ciclo). Campanha de win-back recomendada.",
+                "expectedValue": st["expected_value"],
+                "confidence": confidence,
             })
 
         contact = contact_map.get(cust_name, {})
@@ -764,6 +1042,12 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
             "avg_interval_days": avg_interval_days,
             "churn_risk": churn["risk"],
             "churn_score": churn["score"],
+            "status": st["status"],                 # "active" | "at_risk" | "churned" (fonte única)
+            "expected_value": st["expected_value"],  # valor recuperável por ciclo (régua única)
+            "recoveryScore": rs["recoveryScore"],
+            "recoveryBand": rs["recoveryBand"],
+            "recoveryReasons": rs["recoveryReasons"],
+            "priorityValue": priority_value,
             "trend": trend,
             "segment": segment,
             "rfv": {
@@ -795,28 +1079,27 @@ def process_sales_pipeline(file_path: str, company_id: str, cycle_days: int = 90
 
     insights_by_range = {}
     for dr in DATE_RANGES:
-        result = generate_dynamic_insights(df, dr)
+        result = generate_dynamic_insights(df, dr, cycle_days=cycle_days)
         if result is not None:
             insights_by_range[dr] = result
 
     customer_profiles = build_customer_profiles(df, cycle_days=cycle_days)
 
-    # Summary stats for AnalysisResult (backward-compatible)
+    # Summary stats for AnalysisResult — DERIVADO da fonte única (classify_customer_status),
+    # não mais do corte legado de 60d. Garante que o card de histórico de uploads concorde
+    # com a Visão Geral e o Insights (todos via ciclo efetivo). FIX 4.1.
+    # Definição de oportunidade idêntica à da Visão Geral: status in (at_risk, churned).
     total_revenue = float(df["revenue"].sum() or 0.0)
-    max_date = _max_date(df)
-    limit_active = max_date - timedelta(days=60)
-    churned = (
-        df.group_by("customer_id").agg([
-            pl.col("date").max().alias("ultima_compra"),
-            pl.col("revenue").sum().alias("total_revenue"),
-        ])
-        .filter(pl.col("ultima_compra") < pl.lit(limit_active).cast(pl.Date))
-    )
+    opp_profiles = [
+        p for p in customer_profiles
+        if p.get("status") in ("at_risk", "churned")
+    ]
+    lost_revenue = round(sum(float(p.get("expected_value") or 0.0) for p in opp_profiles), 2)
 
     return {
         "total_revenue": total_revenue,
-        "lost_revenue": float(churned["total_revenue"].sum() or 0.0) if not churned.is_empty() else 0.0,
-        "opportunities_count": len(churned),
+        "lost_revenue": lost_revenue,
+        "opportunities_count": len(opp_profiles),
         "unique_customers": int(df["customer_id"].n_unique()),
         "unique_products": int(df["product_id"].n_unique()),
         "insights_by_range": insights_by_range,

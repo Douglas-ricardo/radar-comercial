@@ -16,6 +16,8 @@ interface OpportunityCardProps {
   product?: string | null
   frequency?: string | null
   confidence?: Confidence
+  recoveryScore?: number
+  recoveryBand?: 'alta' | 'media' | 'baixa'
   status?: OpportunityStatus
   compact?: boolean
   onOpen?: () => void
@@ -43,6 +45,8 @@ export function OpportunityCard({
   product,
   frequency,
   confidence = 'medium',
+  recoveryScore,
+  recoveryBand,
   status,
   compact = false,
   onOpen,
@@ -75,8 +79,21 @@ export function OpportunityCard({
       {(product || frequency) && (
         <p className="mt-1 text-xs text-muted-foreground">
           {product ?? 'Diversos'}
-          {frequency ? ` · compra a cada ${frequency}` : ''}
+          {frequency ? ` · ${frequency}` : ''}
         </p>
+      )}
+      {recoveryBand && typeof recoveryScore === 'number' && (
+        <span
+          className={cn(
+            'mt-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
+            recoveryBand === 'alta' ? 'bg-success/10 text-success'
+            : recoveryBand === 'media' ? 'bg-warning/10 text-warning'
+            : 'bg-muted text-muted-foreground',
+          )}
+          title="Recuperabilidade (0-100): chance relativa de reativar com base no histórico"
+        >
+          {recoveryScore} · {recoveryBand === 'media' ? 'média' : recoveryBand} recuperação
+        </span>
       )}
 
       {/* número-herói: serifa, tinta-navy, figuras tabulares */}
