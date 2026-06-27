@@ -1,5 +1,6 @@
 # data_engine/etl.py
 import hashlib
+import io
 import logging
 import os
 import re
@@ -342,35 +343,90 @@ def _clean_numerics(df: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
+# Separadores candidatos, em ordem de preferência ao empatar (BR usa muito ";").
+_CSV_SEPARATORS = (";", ",", "\t", "|")
+
+
+def _sniff_csv(file_path: str) -> tuple[str, str]:
+    """
+    Detecta (encoding, separador) de um CSV — robustez para arquivos de ERP-BR, que
+    frequentemente vêm com ";" e em Latin-1/Windows-1252 (não UTF-8).
+
+    Encoding: UTF-8 se a amostra decodifica limpa; senão cp1252 (superset de Latin-1).
+    Separador: o mais frequente na PRIMEIRA linha (cabeçalho — sem valores decimais,
+    então não confunde a vírgula decimal "1.234,56" com delimitador). Empate/ausência
+    → ordem de _CSV_SEPARATORS (";" antes de ",").
+    """
+    with open(file_path, "rb") as f:
+        sample = f.read(65536)
+
+    try:
+        sample.decode("utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        encoding = "cp1252"
+
+    first_line = sample.split(b"\n", 1)[0].decode(encoding, errors="ignore")
+    counts = {sep: first_line.count(sep) for sep in _CSV_SEPARATORS}
+    best = max(counts.values())
+    # max() já respeita a ordem de inserção do dict no empate → preferência _CSV_SEPARATORS.
+    separator = next(sep for sep in _CSV_SEPARATORS if counts[sep] == best) if best > 0 else ","
+    if encoding != "utf-8" or separator != ",":
+        logger.info("etl.csv.sniff", extra={"encoding": encoding, "separator": separator})
+    return encoding, separator
+
+
+def _read_csv_frame(file_path: str, sep: str, encoding: str, overrides: dict | None):
+    """
+    Lê o CSV respeitando separador e encoding detectados, forçando overrides de schema.
+    UTF-8 → scan_csv (preserva column pushdown). Latin-1/cp1252 → decodifica em memória
+    para UTF-8 (polars não decodifica cp1252 nativamente) e lê via read_csv.
+    Retorna LazyFrame (utf-8) ou DataFrame (latin-1) — ambos suportam select/rename.
+    """
+    if encoding == "utf-8":
+        return pl.scan_csv(
+            file_path, separator=sep, try_parse_dates=False,
+            infer_schema_length=10_000, schema_overrides=overrides,
+        )
+    with open(file_path, "rb") as f:
+        data = f.read().decode(encoding, errors="replace").encode("utf-8")
+    return pl.read_csv(
+        io.BytesIO(data), separator=sep,
+        infer_schema_length=10_000, schema_overrides=overrides,
+    )
+
+
 def _load_and_normalize(file_path: str) -> pl.DataFrame:
     """
     Loads a CSV/XLSX, selects only canonical columns (column pushdown for CSVs),
     normalises, validates required fields and returns an in-memory DataFrame.
     """
     if file_path.endswith(".csv"):
-        # scan_csv reads the header without loading data → build rename map cheaply.
-        lf = pl.scan_csv(file_path, try_parse_dates=False, infer_schema_length=10_000)
-        raw_cols = lf.collect_schema().names()  # header only — no data loaded yet
+        encoding, sep = _sniff_csv(file_path)
+        # 1ª leitura (sem dados, só header) p/ montar o rename map e achar a receita.
+        header_frame = _read_csv_frame(file_path, sep, encoding, None)
+        raw_cols = (
+            header_frame.collect_schema().names()
+            if isinstance(header_frame, pl.LazyFrame) else header_frame.columns
+        )
 
         rename_map = _build_rename_map(raw_cols)
         # Força a coluna de receita a ser lida como TEXTO. Sem isso, o polars infere
         # "1.500" como Float 1.5 (milhar BR sem centavos) ANTES do nosso _clean_money_str
         # rodar, corrompendo o valor em silêncio. Lendo como str, o cleaner decide o formato.
         revenue_src = next((orig for orig, canon in rename_map.items() if canon == "revenue"), None)
-        schema_overrides = {revenue_src: pl.Utf8} if revenue_src else None
-        if schema_overrides:
-            lf = pl.scan_csv(
-                file_path, try_parse_dates=False,
-                infer_schema_length=10_000, schema_overrides=schema_overrides,
-            )
+        overrides = {revenue_src: pl.Utf8} if revenue_src else None
+
+        # Releitura com o override (reutiliza o header_frame se não há receita a forçar).
+        frame = _read_csv_frame(file_path, sep, encoding, overrides) if overrides else header_frame
         # Select only columns we care about (column pushdown → reads less data from disk).
         # As chaves do rename_map são os nomes ORIGINAIS, então preservam o pushdown.
         cols_to_read = list(rename_map.keys())
         if cols_to_read:
-            lf = lf.select(cols_to_read)
+            frame = frame.select(cols_to_read)
         if rename_map:
-            lf = lf.rename(rename_map)
-        df = lf.collect()
+            frame = frame.rename(rename_map)
+        df = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
     else:
         df = pl.read_excel(file_path)
         df = normalize_columns(df)

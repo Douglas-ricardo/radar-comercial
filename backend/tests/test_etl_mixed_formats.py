@@ -15,8 +15,25 @@ from data_engine.etl import (
     _DATE_NULL_THRESHOLD,
     _cast_types,
     _clean_money_str,
+    _load_and_normalize,
     _parse_dates_multi_format,
+    _sniff_csv,
 )
+
+
+def _write_csv(tmp_path, name, header, rows, encoding, sep):
+    path = tmp_path / name
+    body = sep.join(header) + "\n" + "\n".join(sep.join(r) for r in rows) + "\n"
+    path.write_bytes(body.encode(encoding))
+    return str(path)
+
+
+def _sales_rows(values):
+    """Linhas (data, cliente, valor) repetidas o bastante p/ passar o validador."""
+    out = []
+    for i, v in enumerate(values * 4):
+        out.append((f"{(i % 28) + 1:02d}/01/2026", f"Cliente{i % 4}", v))
+    return out
 
 
 def test_mixed_date_formats_keep_all_rows():
@@ -117,3 +134,62 @@ def test_clean_money_us_grouping_and_sign():
 
 def test_threshold_is_sane():
     assert 0.0 < _DATE_NULL_THRESHOLD < 1.0
+
+
+# ─── FIX #2 — autodetecção de separador e encoding (robustez ERP-BR) ──────────
+
+def test_sniff_detects_semicolon_and_utf8(tmp_path):
+    path = _write_csv(tmp_path, "ponto_virgula.csv",
+                      ["data", "cliente", "valor"],
+                      [("01/01/2026", "ACME", "1.234,56")],
+                      "utf-8", ";")
+    assert _sniff_csv(path) == ("utf-8", ";")
+
+
+def test_sniff_detects_latin1(tmp_path):
+    path = _write_csv(tmp_path, "latin.csv",
+                      ["data", "cliente", "valor"],
+                      [("01/01/2026", "João", "1.234,56")],
+                      "latin-1", ";")
+    encoding, sep = _sniff_csv(path)
+    assert encoding == "cp1252" and sep == ";"
+
+
+def test_sniff_defaults_to_comma_utf8(tmp_path):
+    path = _write_csv(tmp_path, "virgula.csv",
+                      ["data", "cliente", "valor"],
+                      [("01/01/2026", "ACME", "1500")],
+                      "utf-8", ",")
+    assert _sniff_csv(path) == ("utf-8", ",")
+
+
+def test_semicolon_with_comma_decimal(tmp_path):
+    """
+    O caso que a vírgula-delimitador tornava impossível: ";" como separador deixa a
+    vírgula decimal ("1.234,56") conviver no MESMO arquivo, sem virar coluna extra.
+    """
+    path = _write_csv(tmp_path, "br.csv",
+                      ["data", "cliente", "valor"],
+                      _sales_rows(["1.500", "2.300", "29,90", "1.234,56"]),
+                      "utf-8", ";")
+    df = _load_and_normalize(path)
+    vals = set(df["revenue"].to_list())
+    assert {1500.0, 2300.0, 29.90, 1234.56} <= vals
+    assert 1.5 not in vals  # milhar BR não corrompido
+
+
+def test_latin1_semicolon_preserves_accents_and_values(tmp_path):
+    """Arquivo Latin-1 com ";" e acentos: decodifica certo (sem mojibake) e os
+    valores BR são parseados corretamente."""
+    path = _write_csv(tmp_path, "erp_br.csv",
+                      ["data", "cliente", "valor"],
+                      _sales_rows(["1.500", "1.234,56"]) + [
+                          ("15/02/2026", "João Façanha", "2.300"),
+                      ],
+                      "latin-1", ";")
+    df = _load_and_normalize(path)
+    vals = set(df["revenue"].to_list())
+    assert {1500.0, 1234.56, 2300.0} <= vals
+    # nome original preservado para exibição, com acento intacto (decodificou cp1252)
+    displays = " ".join(df["customer_display"].to_list())
+    assert "João Façanha" in displays
