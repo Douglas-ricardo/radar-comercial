@@ -170,11 +170,17 @@ def _parse_dates_multi_format(df: pl.DataFrame) -> pl.DataFrame:
 def _clean_money_str(s: str | None) -> float | None:
     """
     Converte um valor monetário em string para float detectando o formato POR VALOR.
-    Suporta BR e US/internacional misturados no mesmo arquivo:
-      - Tem vírgula → decimal BR: pontos são milhar, vírgula é decimal.
-        "1.234,56" → 1234.56 ; "1.234.567,89" → 1234567.89
-      - Sem vírgula, com ponto → ponto JÁ é decimal (US): NÃO remover.
-        "3706.29" → 3706.29 (NÃO 370629)
+    Suporta BR e US/internacional misturados no mesmo arquivo. Aceita sinal e
+    parênteses contábeis ("(1.234,56)" = -1234.56).
+
+      - Vírgula E ponto → o separador decimal é o ÚLTIMO que aparece.
+        "1.234,56" → 1234.56 (BR) ; "1,234.56" → 1234.56 (US)
+      - Só vírgula → vírgula é decimal (BR). "890,00" → 890.0
+      - Só ponto → AMBÍGUO (decimal US vs milhar BR), resolvido por nº de dígitos:
+          * 2 dígitos após o ponto → decimal (centavos). "3706.29" → 3706.29
+          * exatamente 3 dígitos após um único ponto → milhar BR. "1.500" → 1500
+          * mais de um ponto → todos são milhar. "1.234.567" → 1234567
+          * 1 ou 4+ dígitos após o ponto → decimal. "1.5" → 1.5
       - Sem separador → inteiro puro. "1500" → 1500.0
     """
     if s is None:
@@ -182,14 +188,37 @@ def _clean_money_str(s: str | None) -> float | None:
     t = re.sub(r"[R$\s]", "", str(s)).strip()
     if t == "":
         return None
-    if "," in t:
-        # decimal BR: pontos são milhar, vírgula é decimal
-        t = t.replace(".", "").replace(",", ".")
-    # senão: ponto (se houver) já é decimal — não mexer
+
+    neg = False
+    if t.startswith("(") and t.endswith(")"):  # parênteses contábeis = negativo
+        neg, t = True, t[1:-1]
+    if t.startswith("-"):
+        neg, t = True, t[1:]
+
+    has_comma, has_dot = "," in t, "." in t
+    if has_comma and has_dot:
+        # O separador decimal é o último a aparecer; o outro é milhar.
+        if t.rfind(",") > t.rfind("."):
+            t = t.replace(".", "").replace(",", ".")   # BR: 1.234,56
+        else:
+            t = t.replace(",", "")                       # US: 1,234.56
+    elif has_comma:
+        t = t.replace(",", ".")                          # vírgula decimal (BR)
+    elif has_dot:
+        if t.count(".") > 1:
+            t = t.replace(".", "")                        # 1.234.567 → 1234567
+        else:
+            intpart, frac = t.split(".")
+            # 3 dígitos após um único ponto, parte inteira numérica → milhar BR
+            # (1.500 → 1500). 2 dígitos = centavos; 1/4+ = decimal → mantém o ponto.
+            if len(frac) == 3 and intpart.isdigit():
+                t = intpart + frac
+
     try:
-        return float(t)
+        val = float(t)
     except ValueError:
         return None
+    return -val if neg else val
 
 
 def _cast_types(df: pl.DataFrame) -> pl.DataFrame:
@@ -321,9 +350,19 @@ def _load_and_normalize(file_path: str) -> pl.DataFrame:
     if file_path.endswith(".csv"):
         # scan_csv reads the header without loading data → build rename map cheaply.
         lf = pl.scan_csv(file_path, try_parse_dates=False, infer_schema_length=10_000)
-        raw_cols = lf.columns  # header only — no data loaded yet
+        raw_cols = lf.collect_schema().names()  # header only — no data loaded yet
 
         rename_map = _build_rename_map(raw_cols)
+        # Força a coluna de receita a ser lida como TEXTO. Sem isso, o polars infere
+        # "1.500" como Float 1.5 (milhar BR sem centavos) ANTES do nosso _clean_money_str
+        # rodar, corrompendo o valor em silêncio. Lendo como str, o cleaner decide o formato.
+        revenue_src = next((orig for orig, canon in rename_map.items() if canon == "revenue"), None)
+        schema_overrides = {revenue_src: pl.Utf8} if revenue_src else None
+        if schema_overrides:
+            lf = pl.scan_csv(
+                file_path, try_parse_dates=False,
+                infer_schema_length=10_000, schema_overrides=schema_overrides,
+            )
         # Select only columns we care about (column pushdown → reads less data from disk).
         # As chaves do rename_map são os nomes ORIGINAIS, então preservam o pushdown.
         cols_to_read = list(rename_map.keys())
@@ -368,6 +407,19 @@ def _max_date(df: pl.DataFrame) -> date:
 _AT_RISK_MULT = 1.0   # recency > 1.0× ciclo  → atrasado (proativo)
 _CHURNED_MULT = 1.5   # recency > 1.5× ciclo  → sumiu (win-back)
 _MIN_PURCHASES_FOR_RHYTHM = 3  # abaixo disso, usa ciclo global, não o individual
+
+
+def average_interval_days(span_days: int, frequency: int) -> float:
+    """Intervalo médio entre compras (dias), arredondado a 1 casa.
+
+    RÉGUA ÚNICA: consumida por generate_dynamic_insights E build_customer_profiles para
+    que o eff_cycle — e portanto status, expected_value e recovery_score — seja idêntico
+    nas duas telas. É também o valor persistido em CustomerProfile.avg_interval_days, então
+    todo consumidor lê o MESMO número (sem divergência por arredondamento).
+    """
+    if frequency > 1 and span_days > 0:
+        return round(span_days / (frequency - 1), 1)
+    return 0.0
 
 
 def effective_cycle_days(avg_interval_days: float, frequency: int, cycle_days: int) -> float:
@@ -680,7 +732,7 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str, cycle_days: int
         valor_total = float(row["valor_total"] or 0.0)
         recency = (reference_date - ultima).days if ultima else 0
         span = (ultima - primeira).days if (ultima and primeira) else 0
-        avg_interval = span / (n_purchases - 1) if n_purchases > 1 and span > 0 else 0.0
+        avg_interval = average_interval_days(span, n_purchases)
         st = classify_customer_status(
             recency, avg_interval, n_purchases, valor_total, span, cycle_days=cycle_days
         )
@@ -960,7 +1012,7 @@ def build_customer_profiles(df: pl.DataFrame, cycle_days: int = 90) -> list[dict
         percentage = round((total_rev / total_company_revenue) * 100, 1) if total_company_revenue > 0 else 0.0
 
         span_days = (last_date - first_date).days if (last_date and first_date) else 0
-        avg_interval_days = round(span_days / (frequency - 1), 1) if frequency > 1 and span_days > 0 else 0.0
+        avg_interval_days = average_interval_days(span_days, frequency)
         churn = assess_churn_risk(recency_days, avg_interval_days, frequency, cycle_days=cycle_days)
         # Régua única: mesmo status/valor recuperável que a lista de oportunidades.
         st = classify_customer_status(
@@ -1088,13 +1140,24 @@ def process_sales_pipeline(file_path: str, company_id: str, cycle_days: int = 90
     # Summary stats for AnalysisResult — DERIVADO da fonte única (classify_customer_status),
     # não mais do corte legado de 60d. Garante que o card de histórico de uploads concorde
     # com a Visão Geral e o Insights (todos via ciclo efetivo). FIX 4.1.
-    # Definição de oportunidade idêntica à da Visão Geral: status in (at_risk, churned).
+    #
+    # "Perdido" e "oportunidade" são conjuntos DIFERENTES (mesma régua, recortes distintos):
+    #   - lost_revenue = receita recuperável só dos CHURNED (sumiram) — bate com
+    #     summary.lostRevenue da Visão Geral e com metrics_service.atRisk. NÃO inclui at_risk,
+    #     senão o "perdido" do histórico ficaria maior que o do dashboard (mesmo nome, número
+    #     diferente — origem do "telas se contradizem").
+    #   - opportunities_count = at_risk + churned (toda oportunidade trabalhável), idêntico à
+    #     contagem de oportunidades da Visão Geral.
     total_revenue = float(df["revenue"].sum() or 0.0)
     opp_profiles = [
         p for p in customer_profiles
         if p.get("status") in ("at_risk", "churned")
     ]
-    lost_revenue = round(sum(float(p.get("expected_value") or 0.0) for p in opp_profiles), 2)
+    lost_revenue = round(
+        sum(float(p.get("expected_value") or 0.0)
+            for p in customer_profiles if p.get("status") == "churned"),
+        2,
+    )
 
     return {
         "total_revenue": total_revenue,

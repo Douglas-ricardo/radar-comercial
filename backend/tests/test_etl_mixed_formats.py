@@ -90,5 +90,30 @@ def test_clean_money_edge_cases():
     assert _clean_money_str("lixo") is None
 
 
+def test_br_thousands_dot_without_cents():
+    """
+    FIX #1: milhar BR com ponto e SEM centavos não pode virar fração.
+    "1.500" = mil e quinhentos, não 1,5. Era a corrupção silenciosa mais grave.
+    """
+    assert _clean_money_str("1.500") == 1500.0
+    assert _clean_money_str("R$ 1.200") == 1200.0
+    assert _clean_money_str("10.000") == 10000.0
+    assert _clean_money_str("100.000") == 100000.0
+    assert _clean_money_str("1.000.000") == 1000000.0  # múltiplos pontos = milhar
+    # ponto com 2 dígitos continua sendo decimal (centavos US): NÃO vira milhar
+    assert _clean_money_str("29.90") == 29.90
+    assert _clean_money_str("3706.29") == 3706.29
+    # 1 ou 4+ dígitos após o ponto = decimal
+    assert _clean_money_str("1.5") == 1.5
+
+
+def test_clean_money_us_grouping_and_sign():
+    """Vírgula+ponto: o separador decimal é o último. Sinal e parênteses contábeis."""
+    assert _clean_money_str("1,234.56") == 1234.56     # US: vírgula=milhar
+    assert _clean_money_str("1.234,56") == 1234.56     # BR: ponto=milhar
+    assert _clean_money_str("-1.234,56") == -1234.56
+    assert _clean_money_str("(1.234,56)") == -1234.56  # parênteses contábeis
+
+
 def test_threshold_is_sane():
     assert 0.0 < _DATE_NULL_THRESHOLD < 1.0

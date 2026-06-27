@@ -184,28 +184,68 @@ def test_oportunidades_ordenadas_por_valor_recuperavel():
 
 # ─── FIX 4.1 — summary do AnalysisResult derivado da fonte única ──────────────
 
+def _build_three_customer_df() -> pl.DataFrame:
+    """Como _build_two_customer_df, mas adiciona EmRisco (at_risk) para separar
+    'perdido' (churned) de 'oportunidade' (at_risk + churned). file_max = 2026-06-01.
+      - Recente:    active   (fora da lista)
+      - EmRisco:    at_risk  (recency 35d, ciclo ~29.5d → 1.0–1.5×)
+      - Recorrente: churned  (parou em fev/2026)
+    """
+    df = _build_two_customer_df()
+    em_risco = []
+    for d in (date(2026, 2, 27), date(2026, 3, 27), date(2026, 4, 27)):
+        em_risco.append({"date": d, "customer_id": "EmRisco",
+                         "product_id": "Sal", "revenue": 800.0, "qty": 1.0})
+    extra = pl.DataFrame(em_risco).with_columns(pl.col("date").cast(pl.Date))
+    return pl.concat([df, extra])
+
+
 def test_analysis_result_derives_from_single_source(tmp_path):
     """
-    O summary do AnalysisResult (opportunities_count/lost_revenue) deve vir da fonte
-    única — status in (at_risk, churned) dos profiles —, não do corte legado de 60d.
-    Trava a regressão que reintroduziria a contradição entre o card de histórico de
-    uploads e a Visão Geral/Insights.
+    O summary do AnalysisResult vem da fonte única (status dos profiles), não do corte
+    legado de 60d. FIX #4: 'perdido' e 'oportunidade' são conjuntos DIFERENTES —
+      - lost_revenue = expected_value só dos CHURNED (bate com summary.lostRevenue da
+        Visão Geral e com metrics_service.atRisk).
+      - opportunities_count = at_risk + churned.
+    Trava a regressão do "telas se contradizem" (mesmo nome 'perdida', número diferente).
     """
     csv_path = tmp_path / "vendas.csv"
-    _build_two_customer_df().write_csv(csv_path)
+    _build_three_customer_df().write_csv(csv_path)
 
     result = process_sales_pipeline(str(csv_path), "test-co", cycle_days=90)
     profiles = result["customer_profiles"]
 
-    expected_count = sum(1 for p in profiles if p["status"] in ("at_risk", "churned"))
-    expected_lost = round(
-        sum(p["expected_value"] for p in profiles
-            if p["status"] in ("at_risk", "churned")),
-        2,
-    )
+    at_risk = [p for p in profiles if p["status"] == "at_risk"]
+    churned = [p for p in profiles if p["status"] == "churned"]
+    assert at_risk and churned, "fixture precisa de at_risk E churned para o teste valer"
 
+    expected_count = len(at_risk) + len(churned)
+    expected_lost = round(sum(p["expected_value"] for p in churned), 2)
+
+    # opportunities_count = at_risk + churned
     assert result["opportunities_count"] == expected_count
+    # lost_revenue = SÓ churned (não inclui at_risk)
     assert result["lost_revenue"] == expected_lost
-    assert expected_count >= 1  # Recorrente (churned) garante ≥ 1 oportunidade
+    # e a distinção é real: incluir at_risk daria um número MAIOR (o bug antigo).
+    bug_antigo = round(sum(p["expected_value"] for p in at_risk + churned), 2)
+    assert result["lost_revenue"] < bug_antigo
     # a definição de status existe em todo profile de saída
     assert all("status" in p and "expected_value" in p for p in profiles)
+
+
+def test_avg_interval_identico_entre_insights_e_profile():
+    """
+    FIX #3: o intervalo médio (e portanto eff_cycle/status/expected_value) é calculado
+    pela MESMA régua (average_interval_days) nos dois caminhos — sem divergência por
+    arredondamento. O expectedValue da oportunidade bate com o do profile bit a bit.
+    """
+    df = _build_three_customer_df()
+    insights = generate_dynamic_insights(df, "12m", cycle_days=90)
+    profiles = build_customer_profiles(df, cycle_days=90)
+    assert insights is not None
+
+    for nome in ("EmRisco", "Recorrente"):
+        opp = next(o for o in insights["opportunities"] if o["customer"] == nome)
+        prof = next(p for p in profiles if p["customer_name"] == nome)
+        assert opp["expectedValue"] == prof["expected_value"]
+        assert opp["recoveryScore"] == prof["recoveryScore"]
