@@ -72,6 +72,17 @@ def _ensure_columns():
                 conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN churn_risk VARCHAR DEFAULT 'none'"))
             if "churn_score" not in cols:
                 conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN churn_score INTEGER DEFAULT 0"))
+            # Fonte única persistida (status comercial + recuperabilidade) — elimina recálculo ad-hoc.
+            if "status" not in cols:
+                conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN status VARCHAR"))
+            if "expected_value" not in cols:
+                conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN expected_value FLOAT DEFAULT 0"))
+            if "recovery_score" not in cols:
+                conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN recovery_score INTEGER DEFAULT 0"))
+            if "recovery_band" not in cols:
+                conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN recovery_band VARCHAR"))
+            if "priority_value" not in cols:
+                conn.execute(text("ALTER TABLE customer_profiles ADD COLUMN priority_value FLOAT DEFAULT 0"))
 
     if "uploaded_files" in tables:
         cols = {c["name"] for c in inspector.get_columns("uploaded_files")}

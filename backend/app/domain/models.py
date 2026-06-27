@@ -155,6 +155,14 @@ class CustomerProfile(Base):
     churn_score = Column(Integer, default=0)       # 0–100
     trend = Column(String, default="stable")
     segment = Column(String, default="new")
+    # Fonte única (classify_customer_status / recovery_score em data_engine/etl.py).
+    # Persistidos aqui para que TODO consumidor leia o mesmo valor canônico em vez de
+    # recalcular ad-hoc (status comercial e valor recuperável por ciclo).
+    status = Column(String, nullable=True)            # active | at_risk | churned
+    expected_value = Column(Float, default=0.0)        # valor recuperável por ciclo
+    recovery_score = Column(Integer, default=0)        # 0–100 (recuperabilidade)
+    recovery_band = Column(String, nullable=True)      # alta | media | baixa
+    priority_value = Column(Float, default=0.0)        # expected_value × recovery_score/100
     rfv = Column(JSON, default=dict)
     top_products = Column(JSON, default=list)
     monthly_revenue = Column(JSON, default=list)

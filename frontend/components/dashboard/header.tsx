@@ -12,13 +12,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Bell, LogOut, Settings, User, Building2, Search, CreditCard, Upload } from 'lucide-react'
+import { LogOut, Settings, User, Building2, Search, CreditCard, Upload } from 'lucide-react'
 import Link from 'next/link'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 import { useRouter } from 'next/navigation'
 import { getInitials } from '@/lib/utils'
 import { CommandMenuTrigger } from '@/components/dashboard/command-menu'
@@ -27,17 +22,6 @@ interface DashboardHeaderProps {
   title?: string
   description?: string
 }
-
-// Tipagem explícita para notificações — pronta para API real
-interface Notification {
-  id: number
-  title: string
-  description: string
-  time: string
-  unread: boolean
-}
-
-const NOTIFICATIONS: Notification[] = []
 
 const PLAN_LABELS: Record<string, string> = {
   free: 'Gratuito',
@@ -48,8 +32,6 @@ const PLAN_LABELS: Record<string, string> = {
 export function DashboardHeader({ title, description }: DashboardHeaderProps) {
   const { user, company, logout } = useAuth()
   const router = useRouter()
-
-  const unreadCount = NOTIFICATIONS.filter((n) => n.unread).length
 
   return (
     <header
@@ -70,7 +52,7 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
           <h1 className="truncate font-serif text-xl tracking-[-0.01em] text-foreground">{title}</h1>
         )}
         {description && (
-          <p className="truncate text-sm text-muted-foreground">{description}</p>
+          <p className="hidden truncate text-sm text-muted-foreground sm:block">{description}</p>
         )}
       </div>
 
@@ -100,97 +82,8 @@ export function DashboardHeader({ title, description }: DashboardHeaderProps) {
           </Link>
         </Button>
 
-        {/* Notificações */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative"
-              aria-label={
-                unreadCount > 0
-                  ? `${unreadCount} notificações não lidas`
-                  : 'Notificações'
-              }
-            >
-              <Bell className="h-5 w-5" aria-hidden="true" />
-              {unreadCount > 0 && (
-                <span
-                  className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
-                  aria-hidden="true"
-                >
-                  {unreadCount}
-                </span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="end">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h2 className="font-semibold text-sm">Notificações</h2>
-              {unreadCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto p-0 text-xs text-primary hover:bg-transparent hover:underline"
-                >
-                  Marcar todas como lidas
-                </Button>
-              )}
-            </div>
-
-            <div
-              className="max-h-80 overflow-y-auto"
-              role="log"
-              aria-live="polite"
-              aria-label="Lista de notificações"
-            >
-              {NOTIFICATIONS.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center">
-                  <Bell className="h-8 w-8 text-muted-foreground/40 mb-2" aria-hidden="true" />
-                  <p className="text-sm text-muted-foreground">
-                    Nenhuma notificação por enquanto
-                  </p>
-                </div>
-              ) : (
-                NOTIFICATIONS.map((notification) => (
-                  <article
-                    key={notification.id}
-                    className="flex cursor-pointer gap-3 border-b border-border px-4 py-3 transition-colors last:border-0 hover:bg-secondary/50"
-                  >
-                    <div className="mt-1" aria-hidden="true">
-                      {notification.unread && (
-                        <span className="block h-2 w-2 rounded-full bg-primary" />
-                      )}
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-tight">
-                        {notification.title}
-                        {notification.unread && (
-                          <span className="sr-only"> (não lida)</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {notification.description}
-                      </p>
-                    </div>
-                    <time
-                      className="shrink-0 text-xs text-muted-foreground"
-                      dateTime={notification.time}
-                    >
-                      {notification.time}
-                    </time>
-                  </article>
-                ))
-              )}
-            </div>
-
-            <div className="border-t border-border p-2">
-              <Button variant="ghost" className="w-full text-sm" size="sm">
-                Ver todas as notificações
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        {/* Notificações: ocultas até existir backend de notificações. Não exibir um
+            controle morto (sino que só abre um popover vazio com botão sem ação). */}
 
         <div className="mx-1 h-8 w-px bg-border" aria-hidden="true" />
 

@@ -4,7 +4,7 @@ import io
 import logging
 
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -47,7 +47,7 @@ def mfa_status(token=Depends(get_current_user_and_company), db: Session = Depend
 
 @router.post("/setup")
 @limiter.limit("10/minute")
-def mfa_setup(request: Request, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def mfa_setup(request: Request, response: Response, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     """Gera um secret TOTP novo (ainda não ativa) e devolve o QR + secret para conferência."""
     user = db.query(User).filter(User.id == token.user_id).first()
     if not user:
@@ -66,7 +66,7 @@ def mfa_setup(request: Request, token=Depends(get_current_user_and_company), db:
 
 @router.post("/enable")
 @limiter.limit("10/minute")
-def mfa_enable(request: Request, data: EnableRequest, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def mfa_enable(request: Request, response: Response, data: EnableRequest, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     """Confirma o 1º código TOTP, ativa o MFA e devolve os backup codes (mostrados 1x)."""
     user = db.query(User).filter(User.id == token.user_id).first()
     if not user or not user.mfa_secret:
@@ -90,7 +90,7 @@ def mfa_enable(request: Request, data: EnableRequest, token=Depends(get_current_
 
 @router.post("/disable")
 @limiter.limit("10/minute")
-def mfa_disable(request: Request, data: DisableRequest, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def mfa_disable(request: Request, response: Response, data: DisableRequest, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     """Desativa o MFA — exige a senha como confirmação."""
     user = db.query(User).filter(User.id == token.user_id).first()
     if not user:
@@ -110,7 +110,7 @@ def mfa_disable(request: Request, data: DisableRequest, token=Depends(get_curren
 
 @router.post("/backup-codes/regenerate")
 @limiter.limit("5/minute")
-def regenerate_backup_codes(request: Request, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def regenerate_backup_codes(request: Request, response: Response, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     user = db.query(User).filter(User.id == token.user_id).first()
     if not user or not user.mfa_enabled:
         raise HTTPException(status_code=400, detail="Ative o MFA primeiro.")

@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth/auth-context'
 import { api, opportunitiesApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { InsightsData, CarteiraOpportunity, RecoverySummary, ForecastData } from '@/types'
+import type { InsightsData, CarteiraOpportunity, ResultMetrics, ForecastData } from '@/types'
 
 import { DashboardHeader } from '@/components/dashboard/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,22 +28,14 @@ const chartConfig = {
   perdida: { label: 'Perdida', color: 'var(--color-destructive)' },
 }
 
-const CONFIDENCE: Record<string, { tone: string; label: string }> = {
-  high: { tone: 'text-success', label: 'alta' },
-  medium: { tone: 'text-warning', label: 'média' },
-  low: { tone: 'text-muted-foreground', label: 'baixa' },
-}
-
 export default function DashboardPage() {
   const { user, company } = useAuth()
   const [insights, setInsights] = useState<InsightsData | null>(null)
   const [queue, setQueue] = useState<CarteiraOpportunity[]>([])
-  const [wonCount, setWonCount] = useState(0)
-  const [totalActions, setTotalActions] = useState(0)
-  const [recovery, setRecovery] = useState<RecoverySummary | null>(null)
+  const [metrics, setMetrics] = useState<ResultMetrics | null>(null)
   const [forecast, setForecast] = useState<ForecastData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean }>({
+  const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean; error?: string }>({
     open: false, text: '', loading: false,
   })
 
@@ -52,26 +44,25 @@ export default function DashboardPage() {
       if (!company?.id) return
       setIsLoading(true)
       try {
-        const [insRes, cartRes, recRes, forecastRes] = await Promise.all([
+        const [insRes, cartRes, metricsRes, forecastRes] = await Promise.all([
           api.insights.get(company.id, { dateRange: '6m' }),
           api.carteira.list(company.id),
-          api.outreach.getRecovery(),
+          api.carteira.getMetrics(company.id),
           api.insights.getForecast(company.id, '6m').catch(() => null),
         ])
         if (insRes.success && insRes.data) setInsights(insRes.data)
         if (cartRes.success && cartRes.data) {
-          const all = cartRes.data
+          // A fila "Quem contatar hoje" é pipeline (forward-looking), não métrica de
+          // resultado — segue derivada localmente. Recuperado/conversão vêm do metrics.
           setQueue(
-            all
+            cartRes.data
               .filter((o) => o.action.status === 'to_contact')
               .sort((a, b) =>
                 (b.priorityValue ?? b.expectedValue) - (a.priorityValue ?? a.expectedValue),
               ),
           )
-          setWonCount(all.filter((o) => o.action.status === 'won').length)
-          setTotalActions(all.length)
         }
-        if (recRes.success && recRes.data) setRecovery(recRes.data)
+        if (metricsRes.success && metricsRes.data) setMetrics(metricsRes.data)
         if (forecastRes?.success && forecastRes.data) setForecast(forecastRes.data)
       } catch {
         toast.error('Não foi possível carregar o painel. Tente novamente.')
@@ -87,23 +78,36 @@ export default function DashboardPage() {
     try {
       const res = await opportunitiesApi.generateMessage(opp.id, opp.customerHash, '1m')
       if (res.success && res.data) {
-        setMsg({ open: true, loading: false, text: res.data.message })
+        setMsg({ open: true, loading: false, text: res.data.message, error: undefined })
         toast.success('Mensagem gerada.')
       } else {
-        setMsg({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+        setMsg({ open: true, loading: false, text: '', error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
       }
     } catch {
-      setMsg({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+      setMsg({ open: true, loading: false, text: '', error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
 
   const recoverableNow = queue.reduce((s, o) => s + o.expectedValue, 0)
-  const conversion = totalActions > 0 ? Math.round((wonCount / totalActions) * 100) : null
+  // Métricas de resultado — fonte única (backend). Nenhuma recalculada localmente.
+  const totalRecovered = metrics?.recovered.total ?? 0
+  const conversion = metrics?.conversion ?? null
+  const atRisk = metrics?.atRisk ?? insights?.summary?.lostRevenue ?? 0
 
-  const kpis = [
-    { label: 'Recuperado', value: formatCurrency(recovery?.totalRecovered ?? 0), tone: 'text-success' },
-    { label: 'Em risco', value: formatCurrency(insights?.summary?.lostRevenue ?? 0), tone: 'text-destructive' },
-    { label: 'Conversão da carteira', value: conversion !== null ? `${conversion}%` : 'Sem contatos', tone: 'text-foreground' },
+  const kpis: { label: string; value: string; tone: string; hint?: string }[] = [
+    {
+      label: 'Recuperado',
+      value: formatCurrency(totalRecovered),
+      tone: totalRecovered > 0 ? 'text-success' : 'text-muted-foreground',
+      hint: totalRecovered === 0 ? 'marque clientes como ganho na carteira' : undefined,
+    },
+    { label: 'Em risco', value: formatCurrency(atRisk), tone: 'text-destructive' },
+    {
+      label: 'Conversão da carteira',
+      value: conversion !== null ? `${conversion}%` : '—',
+      tone: conversion !== null ? 'text-foreground' : 'text-muted-foreground',
+      hint: conversion === null ? 'sem contatos ainda' : undefined,
+    },
     { label: 'Clientes ativos', value: String(insights?.summary?.uniqueCustomers ?? '—'), tone: 'text-foreground' },
   ]
 
@@ -114,10 +118,10 @@ export default function DashboardPage() {
         description="Seu painel de trabalho do dia"
       />
 
-      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1400px] mx-auto w-full">
+      <div className="flex-1 space-y-4 sm:space-y-5 p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
         {/* 1 · HERO + 2 · fila "quem contatar hoje" */}
-        <div className="grid gap-6 lg:grid-cols-3">
-          <Card className="flex flex-col justify-between rounded-2xl border-primary/20 bg-accent/40 shadow-sm">
+        <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
+          <Card className="flex flex-col justify-center rounded-2xl border-primary/20 bg-accent/40 shadow-sm gap-4 py-5 sm:gap-6 sm:py-6">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Para recuperar agora
@@ -128,17 +132,17 @@ export default function DashboardPage() {
                 <Skeleton className="h-12 w-44 bg-muted" />
               ) : (
                 <>
-                  <p className="font-[family-name:var(--font-display)] text-5xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">
+                  <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums whitespace-nowrap sm:text-4xl">
                     {formatCurrency(recoverableNow)}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     <span className="font-medium text-foreground tabular-nums">{queue.length}</span>{' '}
                     clientes na fila para contatar
                   </p>
-                  {recovery && recovery.totalRecovered > 0 && (
+                  {totalRecovered > 0 && (
                     <div className="flex items-center gap-1.5 text-sm font-medium text-success">
                       <TrendingUp className="h-4 w-4" aria-hidden />
-                      {formatCurrency(recovery.totalRecovered)} recuperado no período
+                      {formatCurrency(totalRecovered)} recuperado no período
                     </div>
                   )}
                 </>
@@ -146,10 +150,10 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex flex-col rounded-2xl shadow-sm lg:col-span-2">
+          <Card className="flex flex-col rounded-2xl shadow-sm lg:col-span-2 gap-4 py-5 sm:gap-6 sm:py-6">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Quem contatar hoje</CardTitle>
+                <CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Quem contatar hoje</CardTitle>
                 <CardDescription>Priorizado por valor e chance de retorno</CardDescription>
               </div>
               <Link href="/dashboard/carteira">
@@ -168,9 +172,8 @@ export default function DashboardPage() {
                   <EmptyDescription>Importe uma base de vendas para o Radar mapear quem contatar.</EmptyDescription>
                 </Empty>
               ) : (
-                <div className="space-y-2">
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                   {queue.slice(0, 6).map((opp) => {
-                    const conf = CONFIDENCE[opp.confidence] ?? CONFIDENCE.medium
                     const recovTone =
                       opp.recoveryBand === 'alta' ? 'text-success'
                       : opp.recoveryBand === 'media' ? 'text-warning'
@@ -178,7 +181,7 @@ export default function DashboardPage() {
                     return (
                       <div
                         key={opp.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:border-primary/30 hover:shadow-sm"
+                        className="flex items-center justify-between gap-3 bg-card px-3 py-2.5 transition-colors hover:bg-accent/40"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{opp.customer}</p>
@@ -188,27 +191,25 @@ export default function DashboardPage() {
                             {opp.product && (<><span>·</span><span className="truncate">{opp.product}</span></>)}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-4">
+                        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
                           <div className="text-right">
                             <p className="text-sm font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</p>
-                            {opp.recoveryBand && typeof opp.recoveryScore === 'number' ? (
+                            {opp.recoveryBand && typeof opp.recoveryScore === 'number' && (
                               <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium tabular-nums', recovTone)}>
                                 <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                                 {opp.recoveryScore} · {opp.recoveryBand === 'media' ? 'média' : opp.recoveryBand}
-                              </span>
-                            ) : (
-                              <span className={cn('flex items-center justify-end gap-1 text-[11px] font-medium', conf.tone)}>
-                                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> {conf.label}
                               </span>
                             )}
                           </div>
                           {(user?.role === 'admin' || user?.role === 'analyst') && (
                             <Button
                               size="sm" variant="ghost"
-                              className="h-7 gap-1.5 text-xs text-primary hover:bg-accent hover:text-primary"
+                              className="h-9 w-9 p-0 text-primary hover:bg-accent hover:text-primary sm:h-7 sm:w-auto sm:gap-1.5 sm:px-3 sm:text-xs"
                               onClick={() => generateMessage(opp)}
+                              aria-label={`Gerar mensagem para ${opp.customer}`}
                             >
-                              <Sparkles className="h-3.5 w-3.5" /> Gerar
+                              <Sparkles className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline">Gerar</span>
                             </Button>
                           )}
                         </div>
@@ -222,23 +223,26 @@ export default function DashboardPage() {
         </div>
 
         {/* 3 · KPIs de apoio */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
           {kpis.map((k) => (
-            <Card key={k.label} className="rounded-2xl shadow-sm">
+            <Card key={k.label} className="rounded-2xl shadow-sm gap-2 py-4 sm:gap-3 sm:py-5">
               <CardHeader className="pb-1">
                 <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{k.label}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className={cn('font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.02em] tabular-nums', k.tone)}>{isLoading ? '—' : k.value}</p>
+                <p className={cn('font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-bold tracking-[-0.02em] tabular-nums', k.tone)}>{isLoading ? '—' : k.value}</p>
+                {!isLoading && k.hint && (
+                  <p className="mt-1 text-xs text-muted-foreground leading-snug">{k.hint}</p>
+                )}
               </CardContent>
             </Card>
           ))}
         </div>
 
         {/* 4 · Tendência (apoio) */}
-        <Card className="rounded-2xl shadow-sm">
+        <Card className="rounded-2xl shadow-sm gap-4 py-5 sm:gap-6 sm:py-6">
           <CardHeader className="pb-2">
-            <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Tendência</CardTitle>
+            <CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Tendência</CardTitle>
             <CardDescription>Receita capturada versus perdida (6 meses)</CardDescription>
           </CardHeader>
           <CardContent>
@@ -264,9 +268,9 @@ export default function DashboardPage() {
         </Card>
         {/* 5 · Previsão de receita — oculta quando todos os valores são zero (sem base histórica) */}
         {(isLoading || (forecast && forecast.months.some((m) => m.projectedRevenue > 0))) && (
-          <Card className="rounded-2xl shadow-sm">
+          <Card className="rounded-2xl shadow-sm gap-4 py-5 sm:gap-6 sm:py-6">
             <CardHeader className="pb-2">
-              <CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Previsão de receita</CardTitle>
+              <CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Previsão de receita</CardTitle>
               <CardDescription>
                 {forecast ? (
                   <>
@@ -282,7 +286,7 @@ export default function DashboardPage() {
               {isLoading || !forecast ? (
                 <Skeleton className="h-[80px] w-full rounded-xl bg-muted" />
               ) : (
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   {forecast.months.map((m, i) => (
                     <div key={m.month} className={cn('rounded-xl border border-border p-4 space-y-1', i === 0 && 'border-primary/30 bg-accent/40')}>
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{m.month}</p>
@@ -312,12 +316,16 @@ export default function DashboardPage() {
             <div className="space-y-2 py-4">
               <Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" />
             </div>
+          ) : msg.error ? (
+            <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+              {msg.error}
+            </div>
           ) : (
             <Textarea className="min-h-[160px] resize-none text-sm" value={msg.text} onChange={(e) => setMsg((m) => ({ ...m, text: e.target.value }))} />
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsg((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
+            <Button disabled={msg.loading || !!msg.error || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

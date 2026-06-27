@@ -129,7 +129,9 @@ def get_churn_risk(
             "recencyDays": p.recency_days,
             "avgIntervalDays": p.avg_interval_days,
             "totalRevenue": p.total_revenue,
-            "expectedValue": round((p.total_revenue or 0.0) / max(p.rfv.get("frequency", 1) if p.rfv else 1, 1), 2),
+            # Fonte única: valor recuperável por ciclo persistido (classify_customer_status).
+            # NÃO recalcular ad-hoc — garante o MESMO expectedValue da Carteira/Insights.
+            "expectedValue": round(p.expected_value or 0.0, 2),
             "phone": p.phone,
             "email": p.email,
         }

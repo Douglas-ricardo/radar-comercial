@@ -5,17 +5,13 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { Clock, Sparkles, ArrowRight, Phone, CheckCircle2, XCircle, ChevronRight } from 'lucide-react'
 import type { Opportunity, OpportunityStatus } from '@/types'
 
-// Derivado do contrato (types/index.ts) — garante compatibilidade pelo compilador,
-// nunca uma união copiada à mão. InsightsData.opportunities[].confidence === Opportunity['confidence'].
-type Confidence = Opportunity['confidence']
-
 interface OpportunityCardProps {
   customer: string
   expectedValue: number
   daysInactive?: number
   product?: string | null
   frequency?: string | null
-  confidence?: Confidence
+  confidence?: Opportunity['confidence']  // mantido no contrato; não exibido
   recoveryScore?: number
   recoveryBand?: 'alta' | 'media' | 'baixa'
   recoveryReasons?: string[]
@@ -24,12 +20,6 @@ interface OpportunityCardProps {
   onOpen?: () => void
   onGenerateMessage?: () => void
   className?: string
-}
-
-const CONFIDENCE: Record<Confidence, { label: string; tone: string }> = {
-  high: { label: 'alta confiança', tone: 'text-success' },
-  medium: { label: 'média confiança', tone: 'text-warning' },
-  low: { label: 'baixa confiança', tone: 'text-muted-foreground' },
 }
 
 const STATUS: Record<OpportunityStatus, { label: string; icon: typeof Phone; cls: string }> = {
@@ -55,7 +45,6 @@ export function OpportunityCard({
   onGenerateMessage,
   className,
 }: OpportunityCardProps) {
-  const conf = CONFIDENCE[confidence]
   const st = status ? STATUS[status] : null
   const StatusIcon = st?.icon
 
@@ -67,7 +56,7 @@ export function OpportunityCard({
       onKeyDown={onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } : undefined}
       className={cn(
         'group rounded-[var(--radius)] border border-border bg-card transition-colors',
-        compact ? 'p-3.5' : 'p-5',
+        compact ? 'p-3' : 'p-4 sm:p-5',
         onOpen && 'cursor-pointer hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         className,
       )}
@@ -106,23 +95,18 @@ export function OpportunityCard({
         </>
       )}
 
-      {/* número-herói: serifa, tinta-navy, figuras tabulares */}
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <div>
-          <p className={cn('font-mono leading-none text-primary tabular-nums', compact ? 'text-xl' : 'text-2xl')}>
-            {formatCurrency(expectedValue)}
-          </p>
-          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            valor recuperável
-          </p>
-        </div>
-        <span className={cn('flex items-center gap-1.5 text-xs font-medium', conf.tone)}>
-          <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> {conf.label}
-        </span>
+      {/* número-herói */}
+      <div className="mt-3">
+        <p className={cn('font-mono leading-none text-primary tabular-nums', compact ? 'text-lg' : 'text-xl sm:text-2xl')}>
+          {formatCurrency(expectedValue)}
+        </p>
+        <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          valor recuperável
+        </p>
       </div>
 
       {/* rodapé: status + ação */}
-      <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+      <div className="mt-3 flex items-center justify-between border-t border-border pt-2.5">
         {st && StatusIcon ? (
           <span
             className={cn(
@@ -139,7 +123,7 @@ export function OpportunityCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 text-xs text-primary hover:bg-primary/5"
+            className="h-11 gap-1.5 text-xs text-primary hover:bg-primary/5 sm:h-7"
             onClick={(e) => {
               e.stopPropagation()
               onGenerateMessage()

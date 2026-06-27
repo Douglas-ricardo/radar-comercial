@@ -25,7 +25,7 @@ import { api, opportunitiesApi, reportsApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry, SalesTarget } from '@/types'
+import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry, ResultMetrics, SalesTarget } from '@/types'
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   to_contact: 'A contatar',
@@ -68,14 +68,14 @@ const CHANNEL_LABELS: Record<string, string> = {
 function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
   const [status, setStatus] = useState<OpportunityStatus>('to_contact')
   const [notes, setNotes] = useState('')
-  const [channel, setChannel] = useState<string>('')
+  const [channel, setChannel] = useState<string>('none')
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     if (opp) {
       setStatus(opp.action.status)
       setNotes(opp.action.notes ?? '')
-      setChannel(opp.action.channel ?? '')
+      setChannel(opp.action.channel ?? 'none')
     }
   }, [opp])
 
@@ -89,7 +89,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
         expected_value: opp.expectedValue,
         status,
         notes: notes || null,
-        channel: channel || null,
+        channel: channel === 'none' ? null : channel,
       })
       if (res.success) {
         toast.success('Ação registrada.')
@@ -131,7 +131,7 @@ function ActionDialog({ opp, onClose, onSaved, companyId }: ActionDialogProps) {
           <Select value={channel} onValueChange={setChannel}>
             <SelectTrigger><SelectValue placeholder="Selecione o canal (opcional)" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Não informado</SelectItem>
+              <SelectItem value="none">Não informado</SelectItem>
               {Object.entries(CHANNEL_LABELS).map(([v, l]) => (
                 <SelectItem key={v} value={v}>{l}</SelectItem>
               ))}
@@ -165,13 +165,14 @@ export default function CarteiraPage() {
   const isAdmin = user?.role === 'admin'
   const [opportunities, setOpportunities] = useState<CarteiraOpportunity[]>([])
   const [ranking, setRanking] = useState<RankingEntry[]>([])
+  const [metrics, setMetrics] = useState<ResultMetrics | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [selectedOpp, setSelectedOpp] = useState<CarteiraOpportunity | null>(null)
   const [gerencial, setGerencial] = useState<GerencialData | null>(null)
   const [targets, setTargets] = useState<SalesTarget[]>([])
   const [targetDialog, setTargetDialog] = useState(false)
   const [newTarget, setNewTarget] = useState({ keyType: 'branch', keyValue: '', period: 'month', targetValue: '', targetWon: '' })
-  const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
+  const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean; error?: string }>({
     open: false, text: '', loading: false,
   })
   // Filtros de segmentação (só admin vê o filtro de filial/vendedor)
@@ -185,13 +186,13 @@ export default function CarteiraPage() {
     try {
       const res = await opportunitiesApi.generateMessage(opp.id, opp.customerHash, '1m')
       if (res.success && res.data) {
-        setMsgModal({ open: true, text: res.data.message, loading: false })
+        setMsgModal({ open: true, text: res.data.message, loading: false, error: undefined })
         toast.success('Mensagem gerada.')
       } else {
-        setMsgModal({ open: true, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.', loading: false })
+        setMsgModal({ open: true, text: '', loading: false, error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
       }
     } catch {
-      setMsgModal({ open: true, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.', loading: false })
+      setMsgModal({ open: true, text: '', loading: false, error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
 
@@ -201,19 +202,22 @@ export default function CarteiraPage() {
     const requests: Promise<unknown>[] = [
       api.carteira.list(company.id, undefined, branch || undefined, salesperson || undefined),
       api.carteira.getRanking(company.id),
+      api.carteira.getMetrics(company.id, branch || undefined, salesperson || undefined),
     ]
     if (isAdmin) {
       requests.push(api.carteira.getGerencial(company.id))
       requests.push(api.carteira.listTargets(company.id))
     }
-    const [oppsRes, rankRes, gerencialRes, targetsRes] = await Promise.all(requests) as [
+    const [oppsRes, rankRes, metricsRes, gerencialRes, targetsRes] = await Promise.all(requests) as [
       Awaited<ReturnType<typeof api.carteira.list>>,
       Awaited<ReturnType<typeof api.carteira.getRanking>>,
+      Awaited<ReturnType<typeof api.carteira.getMetrics>>,
       Awaited<ReturnType<typeof api.carteira.getGerencial>> | undefined,
       Awaited<ReturnType<typeof api.carteira.listTargets>> | undefined,
     ]
     if (oppsRes.success && oppsRes.data) setOpportunities(oppsRes.data)
     if (rankRes.success && rankRes.data) setRanking(rankRes.data)
+    if (metricsRes.success && metricsRes.data) setMetrics(metricsRes.data)
     if (gerencialRes?.success && gerencialRes?.data) setGerencial(gerencialRes.data)
     if (targetsRes?.success && targetsRes?.data) setTargets(targetsRes.data)
     setIsLoading(false)
@@ -269,11 +273,13 @@ export default function CarteiraPage() {
     won: opportunities.filter((o) => o.action.status === 'won'),
     lost: opportunities.filter((o) => o.action.status === 'lost'),
   }
+  // Funil = breakdown descritivo do board (sums por estágio). A métrica de RESULTADO
+  // ("% do potencial recuperado") vem da fonte única do backend, não recalculada aqui.
   const sumVal = (arr: CarteiraOpportunity[]) => arr.reduce((s, o) => s + o.expectedValue, 0)
   const identified = sumVal(opportunities)
   const contactedVal = sumVal([...byStatus.contacted, ...byStatus.won, ...byStatus.lost])
   const wonVal = sumVal(byStatus.won)
-  const roi = identified > 0 ? Math.round((wonVal / identified) * 100) : 0
+  const capturePct = metrics?.capturePct ?? null
 
   const totalWon = ranking.reduce((sum, r) => sum + r.totalWonValue, 0)
 
@@ -283,7 +289,7 @@ export default function CarteiraPage() {
         title="Carteira Ativa"
         description="Gerencie o status comercial das oportunidades identificadas"
       />
-      <div className="flex-1 p-6 lg:p-8 space-y-6">
+      <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-5 max-w-[1320px] mx-auto w-full">
 
         {/* Filtros de segmentação — só admins veem (analistas têm scope automático) */}
         {isAdmin && (
@@ -359,10 +365,10 @@ export default function CarteiraPage() {
 
           {/* Tab Oportunidades — funil + board por status */}
           <TabsContent value="oportunidades" className="space-y-5 mt-4">
-            {/* Funil + ROI */}
+            {/* Funil + % do potencial recuperado */}
             {!isLoading && opportunities.length > 0 && (
-              <Card className="rounded-2xl border border-border bg-card shadow-sm">
-                <CardContent className="flex flex-wrap items-center justify-between gap-6 py-5">
+              <Card className="rounded-2xl border border-border bg-card shadow-sm py-0">
+                <CardContent className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-4 sm:py-5">
                   <div className="flex items-center gap-3">
                     <FunnelStage label="Identificado" value={identified} />
                     <ArrowRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
@@ -371,15 +377,17 @@ export default function CarteiraPage() {
                     <FunnelStage label="Ganho" value={wonVal} tone="text-success" />
                   </div>
                   <div className="text-right">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">ROI da carteira</p>
-                    <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{roi}%</p>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">% do potencial recuperado</p>
+                    <p className="font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">
+                      {capturePct !== null ? `${capturePct}%` : '—'}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
             )}
 
             {isLoading ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {COLUMNS.map((col) => (
                   <div key={col.status} className="flex flex-col rounded-2xl border border-border bg-secondary/30">
                     <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
@@ -397,18 +405,18 @@ export default function CarteiraPage() {
               </div>
             ) : opportunities.length === 0 ? (
               <Card className="rounded-2xl border border-border bg-card shadow-sm">
-                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center sm:py-16">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
                     <Briefcase className="h-7 w-7" />
                   </div>
-                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Nenhuma oportunidade ainda</p>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em] text-foreground">Nenhuma oportunidade ainda</p>
                   <p className="mt-1 max-w-sm text-sm text-muted-foreground">
                     Processe uma base de vendas para identificar clientes que pararam de comprar e gerar oportunidades de recuperação.
                   </p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {COLUMNS.map((col) => {
                   const stageKey = (o: CarteiraOpportunity) =>
                     col.status === 'to_contact'
@@ -438,7 +446,6 @@ export default function CarteiraPage() {
                               daysInactive={opp.daysInactive}
                               product={opp.product}
                               frequency={opp.frequency}
-                              confidence={opp.confidence}
                               recoveryScore={opp.recoveryScore}
                               recoveryBand={opp.recoveryBand}
                               recoveryReasons={opp.recoveryReasons}
@@ -458,7 +465,7 @@ export default function CarteiraPage() {
           {/* Tab Ranking */}
           <TabsContent value="ranking" className="space-y-4 mt-4">
             {ranking.length > 0 && (
-              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+              <Card className="rounded-2xl border border-border bg-card shadow-sm gap-3 py-4 sm:gap-4 sm:py-5">
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                     <DollarSign className="h-4 w-4 text-success" />
@@ -478,11 +485,11 @@ export default function CarteiraPage() {
               </div>
             ) : ranking.length === 0 ? (
               <Card className="rounded-2xl border border-border bg-card shadow-sm">
-                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center sm:py-16">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
                     <Medal className="h-7 w-7" />
                   </div>
-                  <p className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em] text-foreground">Ranking ainda vazio</p>
+                  <p className="mt-4 font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em] text-foreground">Ranking ainda vazio</p>
                   <p className="mt-1 max-w-sm text-sm text-muted-foreground">
                     Registre o status comercial das oportunidades para ver a conversão por vendedor.
                   </p>
@@ -491,7 +498,7 @@ export default function CarteiraPage() {
             ) : (
               <div className="space-y-3">
                 {ranking.map((entry, idx) => (
-                  <Card key={entry.userId} className="rounded-2xl border border-border bg-card shadow-sm">
+                  <Card key={entry.userId} className="rounded-2xl border border-border bg-card shadow-sm py-0">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3">
@@ -548,9 +555,9 @@ export default function CarteiraPage() {
                 </div>
               ) : !gerencial || (gerencial.by_branch.length === 0 && gerencial.by_salesperson.length === 0) ? (
                 <Card className="rounded-2xl border border-border bg-card shadow-sm">
-                  <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center sm:py-16">
                     <BarChart3 className="h-10 w-10 text-muted-foreground mb-3" />
-                    <p className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Sem dados gerenciais</p>
+                    <p className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Sem dados gerenciais</p>
                     <p className="text-sm text-muted-foreground mt-1">Upload um CSV com colunas de filial e vendedor para ver esta visão.</p>
                   </CardContent>
                 </Card>
@@ -558,14 +565,14 @@ export default function CarteiraPage() {
                 <>
                   {/* Totais */}
                   {gerencial.totals && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                       {[
                         { label: 'Oportunidades', value: gerencial.totals.totalOpportunities, fmt: (v: number) => v.toString() },
                         { label: 'Valor em risco', value: gerencial.totals.totalValue, fmt: formatCurrency },
                         { label: 'Ganhos', value: gerencial.totals.won, fmt: (v: number) => v.toString() },
                         { label: 'Receita recuperada', value: gerencial.totals.wonValue, fmt: formatCurrency },
                       ].map(({ label, value, fmt }) => (
-                        <Card key={label} className="rounded-2xl border border-border bg-card shadow-sm">
+                        <Card key={label} className="rounded-2xl border border-border bg-card shadow-sm py-0">
                           <CardContent className="p-4">
                             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
                             <p className="font-[family-name:var(--font-display)] text-2xl font-extrabold leading-tight tracking-[-0.02em] text-foreground tabular-nums mt-1">{fmt(value)}</p>
@@ -625,7 +632,8 @@ export default function CarteiraPage() {
                                     </span>
                                     <button
                                       onClick={() => handleDeleteTarget(t.id)}
-                                      className="text-muted-foreground hover:text-destructive transition-colors"
+                                      aria-label="Excluir meta"
+                                      className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-colors hover:text-destructive sm:h-7 sm:w-7"
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </button>
@@ -810,6 +818,10 @@ export default function CarteiraPage() {
               <Skeleton className="h-4 w-5/6" />
               <Skeleton className="h-4 w-4/6" />
             </div>
+          ) : msgModal.error ? (
+            <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+              {msgModal.error}
+            </div>
           ) : (
             <Textarea
               className="min-h-[160px] resize-none text-sm"
@@ -822,7 +834,7 @@ export default function CarteiraPage() {
               Fechar
             </Button>
             <Button
-              disabled={msgModal.loading || !msgModal.text}
+              disabled={msgModal.loading || !!msgModal.error || !msgModal.text}
               onClick={() =>
                 navigator.clipboard
                   .writeText(msgModal.text)

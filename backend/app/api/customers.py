@@ -28,20 +28,29 @@ def get_customer(
     if not profile:
         raise HTTPException(status_code=404, detail="Cliente não encontrado no histórico.")
 
+    # Defaults seguros: profiles antigos/parciais podem ter campos nulos ou ausentes.
+    # A serialização nunca deve quebrar (500) nem entregar null em campos que o
+    # frontend acessa direto (rfv.segment, alerts[], etc.).
+    rfv = getattr(profile, "rfv", None) or {
+        "recency": 0, "frequency": 0, "value": 0.0,
+        "recencyScore": 1, "frequencyScore": 1, "valueScore": 1,
+        "segment": "new",
+    }
+
     return {
         "success": True,
         "data": {
             "id": profile.customer_hash,
             "name": profile.customer_name,
-            "document": profile.document_id,
-            "branch": profile.branch,
-            "salesperson": profile.salesperson,
-            "totalRevenue": profile.total_revenue,
-            "percentage": profile.percentage,
-            "trend": profile.trend,
-            "rfv": profile.rfv,
-            "topProducts": profile.top_products,
-            "revenueHistory": profile.monthly_revenue,
-            "alerts": profile.alerts,
+            "document": getattr(profile, "document_id", None),
+            "branch": getattr(profile, "branch", None),
+            "salesperson": getattr(profile, "salesperson", None),
+            "totalRevenue": profile.total_revenue or 0.0,
+            "percentage": profile.percentage or 0.0,
+            "trend": profile.trend or "stable",
+            "rfv": rfv,
+            "topProducts": getattr(profile, "top_products", None) or [],
+            "revenueHistory": getattr(profile, "monthly_revenue", None) or [],
+            "alerts": getattr(profile, "alerts", None) or [],
         },
     }

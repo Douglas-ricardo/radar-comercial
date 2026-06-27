@@ -245,7 +245,7 @@ function DisparoPageContent() {
     return (
       <div className="flex flex-col min-h-screen">
         <DashboardHeader title="Disparo automático" description="Envio automático para clientes inativos" />
-        <div className="flex-1 p-6 lg:p-8 space-y-6">
+        <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-[1200px] mx-auto w-full">
           <div className="h-24 rounded-2xl bg-muted animate-pulse" />
           <div className="h-28 rounded-2xl bg-muted animate-pulse" />
           <div className="h-12 rounded-2xl bg-muted animate-pulse" />
@@ -264,7 +264,7 @@ function DisparoPageContent() {
         title="Disparo automático"
         description="Reative clientes inativos por WhatsApp e e-mail, com mensagens geradas por IA"
       />
-      <div className="flex-1 p-6 lg:p-8 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-[1200px] mx-auto w-full">
 
         {/* Receita recuperada — loop fechado */}
         <Card className="rounded-2xl border border-success/30 bg-success/[0.06] shadow-sm">

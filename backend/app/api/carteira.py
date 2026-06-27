@@ -10,6 +10,7 @@ from app.core.auth import get_current_user_and_company
 from app.core.permissions import visible_branches
 from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, SalesTarget, User
 from app.infrastructure.database import get_db_session
+from app.services import metrics_service
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,38 @@ def list_carteira(
     return {"success": True, "data": page, "pagination": {"total": total, "limit": limit, "offset": offset}}
 
 
+@router.get("/{company_id}/metrics")
+def get_metrics(
+    company_id: str,
+    branch: Optional[str] = None,
+    salesperson: Optional[str] = None,
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """Métricas de RESULTADO (fonte única) — recuperado, conversão, captura, em risco.
+
+    Mesmo recorte territorial da listagem da carteira. Dashboard e carteira consomem
+    daqui, garantindo que o MESMO estado produza os MESMOS números nas duas telas.
+    """
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    allowed_branches = _allowed_branches(db, token_data, branch)
+    scope_hashes: set | None = None
+    if allowed_branches is not None or salesperson:
+        q = db.query(CustomerProfile.customer_hash).filter(
+            CustomerProfile.company_id == company_id
+        )
+        if allowed_branches is not None:
+            q = q.filter(CustomerProfile.branch.in_(allowed_branches))
+        if salesperson:
+            q = q.filter(CustomerProfile.salesperson == salesperson)
+        scope_hashes = {row[0] for row in q.all()}
+
+    data = metrics_service.company_result_metrics(db, company_id, scope_hashes)
+    return {"success": True, "data": data}
+
+
 @router.post("/{company_id}/actions")
 def upsert_action(
     company_id: str,
@@ -255,8 +288,9 @@ def get_ranking(
     for uid, s in stats.items():
         if uid not in user_map:
             continue
-        actionable = s["contacted"] + s["won"] + s["lost"]
-        conversion_rate = round(s["won"] / actionable * 100, 1) if actionable else 0.0
+        # Fonte única da fórmula de conversão (Decisão B). None → 0.0 na exibição
+        # do ranking (vendedor sem deals trabalhados aparece com 0%).
+        conv = metrics_service.conversion_rate(s["won"], s["contacted"], s["lost"])
         ranking.append({
             "userId": uid,
             "userName": user_map[uid],
@@ -265,7 +299,7 @@ def get_ranking(
             "won": s["won"],
             "lost": s["lost"],
             "totalWonValue": round(s["total_won_value"], 2),
-            "conversionRate": conversion_rate,
+            "conversionRate": conv if conv is not None else 0.0,
         })
 
     ranking.sort(key=lambda x: x["won"], reverse=True)
@@ -319,14 +353,13 @@ def get_gerencial(
         q = q.filter(CustomerProfile.branch.in_(allowed_branches))
     profile_map = {row[0]: {"branch": row[1], "salesperson": row[2]} for row in q.all()}
 
-    # Carregar todas as ações da empresa para mapear status por opp_id
+    # Carregar todas as ações da empresa para mapear status por opp_id.
+    # Tiebreak ÚNICO (mais recente por updated_at) compartilhado com /metrics — garante o
+    # MESMO won/conversão nas duas telas, de forma determinística.
     actions = db.query(OpportunityAction).filter_by(company_id=company_id).all()
-    # Agrega por opp_id: último status registrado (qualquer usuário) — vence mais recente
-    action_status: dict = {}
-    action_value: dict = {}
-    for a in actions:
-        action_status[a.opportunity_id] = a.status
-        action_value[a.opportunity_id] = a.expected_value or 0.0
+    latest = metrics_service.latest_action_by_opportunity(actions)
+    action_status: dict = {opp_id: a.status for opp_id, a in latest.items()}
+    action_value: dict = {opp_id: (a.expected_value or 0.0) for opp_id, a in latest.items()}
 
     def _empty_bucket():
         return {"total_opportunities": 0, "total_value": 0.0,
@@ -339,8 +372,8 @@ def get_gerencial(
     for opp in raw_opps:
         opp_id = opp.get("customerHash", opp.get("id", ""))
         prof = profile_map.get(opp_id)
-        if effective_branch and prof is None:
-            continue  # fora do escopo
+        if allowed_branches is not None and prof is None:
+            continue  # fora do escopo territorial
 
         branch_key = (prof.get("branch") or "Sem filial") if prof else "Sem filial"
         sales_key = (prof.get("salesperson") or "Sem vendedor") if prof else "Sem vendedor"
@@ -363,7 +396,7 @@ def get_gerencial(
     def _format(agg: dict, key_name: str):
         rows = []
         for k, v in agg.items():
-            actionable = v["contacted"] + v["won"] + v["lost"]
+            conv = metrics_service.conversion_rate(v["won"], v["contacted"], v["lost"])
             rows.append({
                 key_name: k,
                 "totalOpportunities": v["total_opportunities"],
@@ -373,7 +406,7 @@ def get_gerencial(
                 "won": v["won"],
                 "lost": v["lost"],
                 "wonValue": round(v["won_value"], 2),
-                "conversionRate": round(v["won"] / actionable * 100, 1) if actionable else 0.0,
+                "conversionRate": conv if conv is not None else 0.0,
             })
         rows.sort(key=lambda x: x["totalValue"], reverse=True)
         return rows

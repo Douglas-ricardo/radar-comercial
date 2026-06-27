@@ -285,7 +285,7 @@ export default function SettingsPage() {
         title="Configurações"
         description="Gerencie sua conta e preferências do Radar"
       />
-      <div className="flex-1 p-6 lg:p-8">
+      <div className="flex-1 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
         <Tabs defaultValue="profile" className="space-y-6">
           <TabsList>
             <TabsTrigger value="profile" className="gap-2">

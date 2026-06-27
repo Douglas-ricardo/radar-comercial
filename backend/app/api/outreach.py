@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from app.core.clock import utcnow
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -108,7 +108,7 @@ def update_config(
 
 @router.post("/whatsapp/connect")
 @limiter.limit("10/minute")
-def whatsapp_connect(request: Request, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def whatsapp_connect(request: Request, response: Response, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     """Cria a instância e retorna o QR Code (base64) para o vendedor escanear."""
     if token.role not in ("admin", "analyst"):
         raise HTTPException(status_code=403, detail="Sem permissão para conectar o WhatsApp.")
@@ -243,7 +243,7 @@ def update_contact(
 
 @router.get("/preview")
 @limiter.limit("15/minute")
-def preview_message(request: Request, token=Depends(require_analyst_or_above), db: Session = Depends(get_db_session)):
+def preview_message(request: Request, response: Response, token=Depends(require_analyst_or_above), db: Session = Depends(get_db_session)):
     """Gera (sem enviar) a mensagem de um cliente elegível, para o vendedor revisar
     exatamente o que será disparado antes de confirmar."""
     cfg = _get_or_create_config(db, token.company_id)
@@ -251,7 +251,7 @@ def preview_message(request: Request, token=Depends(require_analyst_or_above), d
         db.query(CustomerProfile)
         .filter(CustomerProfile.company_id == token.company_id)
         .filter(CustomerProfile.contact_opt_out.is_(False))
-        .filter(CustomerProfile.segment.in_(["at_risk", "lost"]))
+        .filter(CustomerProfile.status.in_(["at_risk", "churned"]))  # status canônico (== Carteira)
         .filter((CustomerProfile.phone.isnot(None)) | (CustomerProfile.email.isnot(None)))
         .order_by(CustomerProfile.total_revenue.desc())
         .first()
@@ -293,7 +293,7 @@ def erase_contact(
 
 @router.post("/send-now")
 @limiter.limit("6/minute")
-def send_now(request: Request, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
+def send_now(request: Request, response: Response, token=Depends(get_current_user_and_company), db: Session = Depends(get_db_session)):
     """Dispara o lote do dia imediatamente (respeita opt-out, dedup e teto diário)."""
     if token.role not in ("admin", "analyst"):
         raise HTTPException(status_code=403, detail="Sem permissão.")

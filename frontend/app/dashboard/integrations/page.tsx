@@ -220,7 +220,7 @@ function IntegrationsPageContent() {
         title="Integrações"
         description="Gerencie API Keys para ingestão automática de dados via ERP ou n8n"
       />
-      <div className="flex-1 p-6 lg:p-8 space-y-6">
+      <div className="flex-1 p-6 lg:p-8 space-y-6 max-w-[1200px] mx-auto w-full">
 
         {/* CRM bidirecional */}
         <CrmSection />

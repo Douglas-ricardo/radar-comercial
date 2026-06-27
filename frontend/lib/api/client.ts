@@ -22,6 +22,7 @@ import type {
   NotificationPreference,
   CarteiraOpportunity,
   RankingEntry,
+  ResultMetrics,
   OpportunityStatus,
   GenerateMessageResponse,
   SyncConfig,
@@ -541,6 +542,18 @@ export const carteiraApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+
+  async getMetrics(
+    companyId: string,
+    branch?: string,
+    salesperson?: string
+  ): Promise<ApiResponse<ResultMetrics>> {
+    const params = new URLSearchParams()
+    if (branch) params.set('branch', branch)
+    if (salesperson) params.set('salesperson', salesperson)
+    const q = params.size ? `?${params.toString()}` : ''
+    return fetchWithAuth(`/carteira/${companyId}/metrics${q}`)
   },
 
   async getRanking(companyId: string): Promise<ApiResponse<RankingEntry[]>> {

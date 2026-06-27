@@ -24,6 +24,47 @@ _ETL_LOCK_WAIT = 5
 _RETAIN_SOURCE = os.getenv("RETAIN_SOURCE_FILES", "false").lower() == "true"
 
 
+def customer_profile_row(company_id: str, p: dict, *, preserved=(None, None, False), opted_out=frozenset()) -> CustomerProfile:
+    """Mapeia o dict de perfil (saída de build_customer_profiles) para a linha CustomerProfile.
+
+    Inclui a FONTE ÚNICA persistida (status/expected_value/recovery_*), preserva contato/opt-out
+    entre reprocessos. Extraído para testar o mapeamento sem rodar a task inteira.
+    `preserved` = (phone, email, opt_out) da versão anterior; `opted_out` = hashes em opt-out durável.
+    """
+    old_phone, old_email, old_opt_out = preserved
+    return CustomerProfile(
+        company_id=company_id,
+        customer_hash=p["customer_hash"],
+        customer_name=p["customer_name"],
+        phone=p.get("phone") or old_phone,
+        email=p.get("email") or old_email,
+        contact_opt_out=bool(old_opt_out) or (p["customer_hash"] in opted_out),
+        document_id=p.get("document_id"),
+        branch=p.get("branch"),
+        salesperson=p.get("salesperson"),
+        total_revenue=p["total_revenue"],
+        percentage=p["percentage"],
+        last_purchase_date=p["last_purchase_date"],
+        recency_days=p["recency_days"],
+        avg_interval_days=p.get("avg_interval_days", 0.0),
+        churn_risk=p.get("churn_risk", "none"),
+        churn_score=p.get("churn_score", 0),
+        trend=p["trend"],
+        segment=p["segment"],
+        # Fonte única (classify_customer_status / recovery_score) — persistida para que
+        # churn-risk, disparo e métricas leiam o MESMO valor, sem recalcular ad-hoc.
+        status=p.get("status"),
+        expected_value=p.get("expected_value", 0.0),
+        recovery_score=p.get("recoveryScore", 0),
+        recovery_band=p.get("recoveryBand"),
+        priority_value=p.get("priorityValue", 0.0),
+        rfv=p["rfv"],
+        top_products=p["top_products"],
+        monthly_revenue=p["monthly_revenue"],
+        alerts=p["alerts"],
+    )
+
+
 @celery_app.task(bind=True, max_retries=3, soft_time_limit=1500, time_limit=1800)
 def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
     """
@@ -90,33 +131,14 @@ def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
             .filter_by(company_id=company_id).all()
         }
         db.query(CustomerProfile).filter_by(company_id=company_id).delete()
-        new_profiles = []
-        for p in result["customer_profiles"]:
-            old_phone, old_email, old_opt_out = preserved.get(p["customer_hash"], (None, None, False))
-            new_profiles.append(CustomerProfile(
-                company_id=company_id,
-                customer_hash=p["customer_hash"],
-                customer_name=p["customer_name"],
-                phone=p.get("phone") or old_phone,
-                email=p.get("email") or old_email,
-                contact_opt_out=bool(old_opt_out) or (p["customer_hash"] in opted_out),
-                document_id=p.get("document_id"),
-                branch=p.get("branch"),
-                salesperson=p.get("salesperson"),
-                total_revenue=p["total_revenue"],
-                percentage=p["percentage"],
-                last_purchase_date=p["last_purchase_date"],
-                recency_days=p["recency_days"],
-                avg_interval_days=p.get("avg_interval_days", 0.0),
-                churn_risk=p.get("churn_risk", "none"),
-                churn_score=p.get("churn_score", 0),
-                trend=p["trend"],
-                segment=p["segment"],
-                rfv=p["rfv"],
-                top_products=p["top_products"],
-                monthly_revenue=p["monthly_revenue"],
-                alerts=p["alerts"],
-            ))
+        new_profiles = [
+            customer_profile_row(
+                company_id, p,
+                preserved=preserved.get(p["customer_hash"], (None, None, False)),
+                opted_out=opted_out,
+            )
+            for p in result["customer_profiles"]
+        ]
         db.bulk_save_objects(new_profiles)
 
         # ── AnalysisResult: summary for history view ──────────────────────────

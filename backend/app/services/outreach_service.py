@@ -485,6 +485,18 @@ def process_due_enrollments(db: Session, company_id: str, company_name: str, lim
     if not config:
         return {"processed": 0, "sent": 0, "stopped": 0, "completed": 0}
 
+    # Reconcilia o status do WhatsApp com o estado real do Evolution (evita pular
+    # o canal por status estático travado em 'connecting').
+    if config.whatsapp_enabled and config.evolution_instance and evolution_client.is_configured():
+        try:
+            _state = evolution_client.connection_state(config.evolution_instance)
+            _mapped = {"open": "connected", "connecting": "connecting"}.get(_state, "disconnected")
+            if _mapped != config.whatsapp_status:
+                config.whatsapp_status = _mapped
+                db.commit()
+        except evolution_client.EvolutionError:
+            pass
+
     sent = stopped = completed = 0
     for enr in due:
         # parada antecipada?

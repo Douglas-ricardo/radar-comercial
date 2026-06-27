@@ -81,7 +81,7 @@ function BillingContent() {
         title="Plano e faturamento"
         description="Gerencie sua assinatura e veja o uso atual"
       />
-      <div className="flex-1 space-y-6 p-6 lg:p-8">
+      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
 
         {/* Confirmação de pagamento em sincronização */}
         {syncing && (

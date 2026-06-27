@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Megaphone, Plus, Send, Trash2, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 
 const STATUS_LABELS: Record<Campaign['status'], string> = {
   draft: 'Rascunho',
@@ -59,13 +60,18 @@ export default function CampanhasPage() {
   async function load() {
     if (!company) return
     setLoading(true)
-    const [c, t] = await Promise.all([
-      api.campaigns.list(company.id),
-      api.templates.list(),
-    ])
-    if (c.success && c.data) setCampaigns(c.data)
-    if (t.success && t.data) setTemplates(t.data)
-    setLoading(false)
+    try {
+      const [c, t] = await Promise.all([
+        api.campaigns.list(company.id),
+        api.templates.list(),
+      ])
+      if (c.success && c.data) setCampaigns(c.data)
+      if (t.success && t.data) setTemplates(t.data)
+    } catch {
+      toast.error('Não foi possível carregar as campanhas.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [company?.id])
@@ -92,23 +98,30 @@ export default function CampanhasPage() {
     if (res.success) {
       setCreateOpen(false)
       setForm({ name: '', segment: '', branch: '', salesperson: '', messageContent: '', selectedTemplateId: '' })
+      toast.success('Campanha criada.')
       load()
+    } else {
+      toast.error(res.error ?? 'Não foi possível criar a campanha.')
     }
   }
 
   async function handleSend(campaignId: string) {
     if (!company) return
     setSending(campaignId)
-    await api.campaigns.send(company.id, campaignId)
+    const res = await api.campaigns.send(company.id, campaignId)
     setSending(null)
+    if (res.success) toast.success('Campanha enviada.')
+    else toast.error(res.error ?? 'Não foi possível enviar a campanha.')
     load()
   }
 
   async function handleDelete(campaignId: string) {
     if (!company || !isAdmin) return
     setDeleting(campaignId)
-    await api.campaigns.remove(company.id, campaignId)
+    const res = await api.campaigns.remove(company.id, campaignId)
     setDeleting(null)
+    if (res.success) toast.success('Campanha excluída.')
+    else toast.error(res.error ?? 'Não foi possível excluir a campanha.')
     load()
   }
 

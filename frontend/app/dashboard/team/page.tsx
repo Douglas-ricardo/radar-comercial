@@ -290,7 +290,7 @@ function TeamPageContent() {
         description="Gerencie os membros da sua equipe e suas permissoes"
       />
 
-      <div className="flex-1 space-y-6 p-6 lg:p-8">
+      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
         {/* Stats */}
         <div className="grid gap-4 sm:grid-cols-3">
           <Card className="rounded-2xl border border-border bg-card shadow-sm">

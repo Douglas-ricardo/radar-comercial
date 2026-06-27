@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Form
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -196,7 +196,7 @@ def _conn_for_slug(db: Session, slug: str, protocol: str) -> tuple[Company, SSOC
 
 @router.get("/{slug}/oidc/login")
 @limiter.limit("20/minute")
-def oidc_login(slug: str, request: Request, db: Session = Depends(get_db_session)):
+def oidc_login(slug: str, request: Request, response: Response, db: Session = Depends(get_db_session)):
     company, conn = _conn_for_slug(db, slug, "oidc")
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(16)
@@ -259,7 +259,7 @@ def saml_metadata(slug: str, db: Session = Depends(get_db_session)):
 
 @router.get("/{slug}/saml/login")
 @limiter.limit("20/minute")
-def saml_login(slug: str, request: Request, db: Session = Depends(get_db_session)):
+def saml_login(slug: str, request: Request, response: Response, db: Session = Depends(get_db_session)):
     company, conn = _conn_for_slug(db, slug, "saml")
     try:
         url = sso_service.saml_login_redirect(conn, _saml_entity_id(slug), _saml_acs_url(), relay_state=slug)

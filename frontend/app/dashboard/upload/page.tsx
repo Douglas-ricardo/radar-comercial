@@ -109,7 +109,7 @@ export default function UploadPage() {
         description="Faça o upload da sua base histórica de vendas para gerar insights."
       />
 
-      <div className="flex-1 p-6 md:p-8 max-w-[1400px] mx-auto w-full space-y-12">
+      <div className="flex-1 p-6 md:p-8 max-w-[960px] mx-auto w-full space-y-8">
         <div className="min-h-[60px] flex items-center justify-center">
           {(hasFile || isCompleted) && <UploadStepper status={status} />}
         </div>

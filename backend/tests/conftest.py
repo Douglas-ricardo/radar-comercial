@@ -87,7 +87,8 @@ def company_a(db):
     company, admin = _make_company_with_admin(db, "Empresa A")
     db.add(CustomerProfile(
         company_id=company.id, customer_hash="hash_a_001", customer_name="Cliente A1",
-        segment="at_risk", recency_days=70, total_revenue=1000.0, phone="+5511999990001",
+        segment="at_risk", status="at_risk", recency_days=70, total_revenue=1000.0,
+        phone="+5511999990001",
     ))
     db.commit()
     return {"company": company, "admin": admin, "cookie": _cookie(admin), "customer_hash": "hash_a_001"}

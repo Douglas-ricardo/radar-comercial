@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -96,6 +96,7 @@ Gere apenas o texto da mensagem, sem títulos ou explicações."""
 @limiter.limit("20/minute")
 def generate_message(
     request: Request,
+    response: Response,
     opportunity_id: str,
     data: GenerateMessageRequest,
     token_data=Depends(require_analyst_or_above),

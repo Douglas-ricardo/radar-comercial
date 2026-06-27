@@ -10,7 +10,7 @@ from app.core.clock import utcnow
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -230,6 +230,7 @@ def trigger_sync(
 @limiter.limit("60/minute")
 def ingest_data(
     request: Request,
+    response: Response,
     body: IngestRequest,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     db: Session = Depends(get_db_session),

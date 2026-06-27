@@ -393,6 +393,22 @@ export interface User {
     cached: boolean
   }
 
+  /** Métricas de resultado — fonte única (backend metrics_service). */
+  export interface ResultMetrics {
+    recovered: { total: number; manual: number; outreach: number }
+    /** won / trabalhados (Decisão B). null = sem deals trabalhados. */
+    conversion: number | null
+    worked: number
+    won: number
+    contacted: number
+    lost: number
+    toContact: number
+    /** % do potencial recuperado (antigo "ROI"). null = sem potencial. */
+    capturePct: number | null
+    potentialTotal: number
+    atRisk: number
+  }
+
   export interface RankingEntry {
     userId: string
     userName: string

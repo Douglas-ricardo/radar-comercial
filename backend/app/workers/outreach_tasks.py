@@ -17,12 +17,38 @@ from app.core.celery_app import celery_app
 from app.infrastructure.database import SessionLocal
 from app.infrastructure.redis_client import redis_client
 from app.domain.models import Company, CustomerProfile, OutreachConfig, OutreachLog, CadenceEnrollment
-from app.services import outreach_service
+from app.services import outreach_service, evolution_client
 
 logger = logging.getLogger(__name__)
 
-# Segmentos que representam oportunidade de recuperação
-_TARGET_SEGMENTS = ("at_risk", "lost")
+
+def _sync_whatsapp_status(db, config: OutreachConfig) -> None:
+    """Reconcilia o whatsapp_status com o estado REAL da instância no Evolution.
+
+    O status no banco só era atualizado pelo polling do frontend na tela de QR.
+    Se o usuário fechava o modal antes do polling pegar o 'open', o banco ficava
+    travado em 'connecting' e o worker pulava o WhatsApp silenciosamente. Aqui o
+    worker se auto-corrige consultando o estado ao vivo antes de disparar.
+    """
+    if not (config.whatsapp_enabled and config.evolution_instance and evolution_client.is_configured()):
+        return
+    try:
+        state = evolution_client.connection_state(config.evolution_instance)
+    except evolution_client.EvolutionError as exc:
+        logger.warning("outreach.status.sync_error", extra={"company_id": config.company_id, "error": str(exc)})
+        return
+    mapped = {"open": "connected", "connecting": "connecting"}.get(state, "disconnected")
+    if mapped != config.whatsapp_status:
+        logger.info("outreach.status.synced", extra={
+            "company_id": config.company_id, "from": config.whatsapp_status, "to": mapped,
+        })
+        config.whatsapp_status = mapped
+        db.commit()
+
+# Status comercial (fonte única) que representa oportunidade de recuperação.
+# Antes usava `segment` (RFV) — divergia da Carteira/Insights. Agora a elegibilidade do
+# disparo usa o MESMO `status` canônico das oportunidades (quem aparece na Carteira == quem é contatado).
+_TARGET_STATUSES = ("at_risk", "churned")
 # Intervalo aleatório entre envios (segundos) — evita padrão de automação
 _MIN_GAP, _MAX_GAP = 8, 25
 # Lock por empresa — evita que beat + envio manual concorrentes furem o dedup
@@ -46,7 +72,7 @@ def _eligible_profiles(db, company_id: str, config: OutreachConfig) -> list:
         db.query(CustomerProfile)
         .filter(CustomerProfile.company_id == company_id)
         .filter(CustomerProfile.contact_opt_out.is_(False))
-        .filter(CustomerProfile.segment.in_(_TARGET_SEGMENTS))
+        .filter(CustomerProfile.status.in_(_TARGET_STATUSES))
     )
     if config.min_opportunity_value and config.min_opportunity_value > 0:
         q = q.filter(CustomerProfile.total_revenue >= config.min_opportunity_value)
@@ -84,6 +110,9 @@ def run_company_outreach(db, company_id: str, company_name: str, user_id: str | 
             return {"sent": 0, "failed": 0, "skipped": 0, "reason": "sem configuração"}
         if not (config.whatsapp_enabled or config.email_enabled):
             return {"sent": 0, "failed": 0, "skipped": 0, "reason": "nenhum canal ativo"}
+
+        # Reconcilia o status do WhatsApp com o Evolution antes de decidir canais.
+        _sync_whatsapp_status(db, config)
 
         profiles = _eligible_profiles(db, company_id, config)
         limit = max(config.daily_limit or 30, 0)

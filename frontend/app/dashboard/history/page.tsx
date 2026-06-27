@@ -167,7 +167,7 @@ export default function HistoryPage() {
         description="Visualize e gerencie todas as suas análises anteriores"
       />
 
-      <div className="flex-1 space-y-6 p-6 lg:p-8">
+      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
         <div className="flex items-center gap-4">
           <div className="relative flex-1 max-w-md">
             <Search

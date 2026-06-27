@@ -35,6 +35,13 @@ def seed_demo_data(db: Session, company) -> None:
         total_revenue += revenue
         recency = rng.choice([10, 25, 40, 70, 120, 200])
         segment = "lost" if recency > 150 else ("at_risk" if recency > 60 else rng.choice(["champion", "loyal", "new"]))
+        # Status canônico (fonte única): demo "lost"→churned, "at_risk"→at_risk, resto→active.
+        # A elegibilidade do disparo e o churn-risk leem `status`/`expected_value` (não `segment`).
+        status = "churned" if segment == "lost" else ("at_risk" if segment == "at_risk" else "active")
+        is_opp = status in ("at_risk", "churned")
+        # expected_value = MESMO valor da oportunidade (consistência churn-risk ↔ Carteira ↔ disparo).
+        exp = round(revenue * 0.15, 2) if is_opp else 0.0
+        rec_score = min(95, 40 + recency // 4) if is_opp else 0
         chash = hashlib.sha256(f"{company.id}:{name}".encode()).hexdigest()[:16]
         # Histórico mensal: ativo nos primeiros meses, esfria conforme recência.
         active_months = len(_MONTHS) - min(recency // 40, len(_MONTHS) - 1)
@@ -48,9 +55,11 @@ def seed_demo_data(db: Session, company) -> None:
             churn_score=min(99, recency // 2), avg_interval_days=float(rng.choice([20, 30, 45])),
             monthly_revenue=monthly, rfv={"recency": recency, "frequency": rng.randint(1, 12), "value": revenue},
             phone=None, email=None,
+            status=status, expected_value=exp, recovery_score=rec_score,
+            recovery_band="alta" if rec_score >= 70 else ("media" if rec_score >= 40 else "baixa"),
+            priority_value=round(exp * rec_score / 100, 2),
         ))
-        if segment in ("at_risk", "lost"):
-            exp = round(revenue * 0.15, 2)
+        if is_opp:
             lost_revenue += exp
             opportunities.append({
                 "id": chash, "customerHash": chash, "customer": name,

@@ -106,7 +106,7 @@ function RfvBlock({ rfv }: { rfv: CustomerRFV }) {
   const segment = RFV_SEGMENT_CONFIG[rfv.segment]
 
   return (
-    <Card className="rounded-2xl shadow-sm">
+    <Card className="rounded-2xl shadow-sm gap-4 py-5 sm:gap-6 sm:py-6">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div>
@@ -142,12 +142,12 @@ function RfvBlock({ rfv }: { rfv: CustomerRFV }) {
 
 function PageSkeleton() {
   return (
-    <div className="space-y-8 p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
+    <div className="space-y-6 p-4 sm:space-y-8 sm:p-6 lg:p-8 max-w-[1200px] mx-auto w-full">
       <div className="flex items-center gap-3">
         <Skeleton className="h-8 w-8 rounded-lg bg-muted" />
         <Skeleton className="h-6 w-48 bg-muted" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
         {Array.from({ length: 3 }).map((_, i) => (
           <Card key={i} className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2"><Skeleton className="h-3 w-24 bg-muted" /></CardHeader>
@@ -155,7 +155,7 @@ function PageSkeleton() {
           </Card>
         ))}
       </div>
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <Skeleton className="h-64 rounded-2xl bg-muted" />
         <Skeleton className="h-64 rounded-2xl bg-muted lg:col-span-2" />
       </div>
@@ -176,15 +176,19 @@ export default function CustomerDetailPage({
   const router      = useRouter()
 
   const { data, isLoading, error, refetch } = useCustomerDetail(company?.id, id)
-  const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean }>({ open: false, text: '', loading: false })
+  const [msg, setMsg] = useState<{ open: boolean; text: string; loading: boolean; error?: string }>({ open: false, text: '', loading: false })
 
   async function generateMessage() {
     setMsg({ open: true, text: '', loading: true })
     try {
       const res = await opportunitiesApi.generateMessage(id, id, '1m')
-      setMsg({ open: true, loading: false, text: res.success && res.data ? res.data.message : 'Erro ao gerar mensagem. Tente novamente.' })
+      if (res.success && res.data) {
+        setMsg({ open: true, loading: false, text: res.data.message, error: undefined })
+      } else {
+        setMsg({ open: true, loading: false, text: '', error: 'Erro ao gerar mensagem. Tente novamente.' })
+      }
     } catch {
-      setMsg({ open: true, loading: false, text: 'Erro ao gerar mensagem. Tente novamente.' })
+      setMsg({ open: true, loading: false, text: '', error: 'Erro ao gerar mensagem. Tente novamente.' })
     }
   }
 
@@ -200,13 +204,27 @@ export default function CustomerDetailPage({
 
   if (!data) return null
 
+  // Blindagem: payload parcial (profile antigo) não pode estourar TypeError na render.
+  if (!data.rfv) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center">
+        <ErrorState
+          message="Perfil incompleto para este cliente. Reprocesse a base para atualizar."
+          onRetry={refetch}
+        />
+      </div>
+    )
+  }
+
+  const alerts = data.alerts ?? []
+
   const trendIcon =
     data.trend === 'up'   ? <TrendingUp   className="h-4 w-4 text-success" /> :
     data.trend === 'down' ? <TrendingDown className="h-4 w-4 text-destructive" /> :
                             <Minus        className="h-4 w-4 text-muted-foreground" />
 
-  const recoverable = data.alerts.reduce((s, a) => s + a.expectedValue, 0)
-  const topAlert = [...data.alerts].sort((a, b) => b.expectedValue - a.expectedValue)[0]
+  const recoverable = alerts.reduce((s, a) => s + a.expectedValue, 0)
+  const topAlert = [...alerts].sort((a, b) => b.expectedValue - a.expectedValue)[0]
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -248,7 +266,7 @@ export default function CustomerDetailPage({
       </div>
 
       {/* ── Conteúdo ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 p-6 lg:p-8 max-w-[1200px] mx-auto w-full space-y-8">
+      <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto w-full space-y-5 sm:space-y-6">
 
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-[-0.02em]">{data.name}</h1>
@@ -267,7 +285,7 @@ export default function CustomerDetailPage({
 
         {/* Ação recomendada — hoisted ao topo */}
         {topAlert && (
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/20 bg-accent/40 p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/20 bg-accent/40 p-4 shadow-sm sm:p-5">
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Ação recomendada</p>
               <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold leading-none tracking-[-0.02em] text-primary tabular-nums">{formatCurrency(recoverable)}</p>
@@ -282,8 +300,8 @@ export default function CustomerDetailPage({
         )}
 
         {/* ── KPIs ──────────────────────────────────────────────────────────── */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Card className="rounded-2xl shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+          <Card className="rounded-2xl shadow-sm gap-2 py-4 sm:gap-3 sm:py-5">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Receita total
@@ -295,7 +313,7 @@ export default function CustomerDetailPage({
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl shadow-sm">
+          <Card className="rounded-2xl shadow-sm gap-2 py-4 sm:gap-3 sm:py-5">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Última compra
@@ -311,7 +329,7 @@ export default function CustomerDetailPage({
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl shadow-sm">
+          <Card className="rounded-2xl shadow-sm gap-2 py-4 sm:gap-3 sm:py-5">
             <CardHeader className="pb-2 space-y-0">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Frequência
@@ -325,16 +343,16 @@ export default function CustomerDetailPage({
         </div>
 
         {/* ── RFV + Gráfico de receita ─────────────────────────────────────── */}
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
           <RfvBlock rfv={data.rfv} />
 
-          <Card className="rounded-2xl shadow-sm lg:col-span-2">
+          <Card className="rounded-2xl shadow-sm lg:col-span-2 gap-4 py-5 sm:gap-6 sm:py-6">
             <CardHeader className="pb-2">
               <CardTitle className="font-[family-name:var(--font-display)] text-base font-bold tracking-[-0.02em]">Evolução de receita</CardTitle>
               <CardDescription className="text-xs">Histórico mensal de compras</CardDescription>
             </CardHeader>
             <CardContent>
-              {data.revenueHistory.length === 0 ? (
+              {(data.revenueHistory ?? []).length === 0 ? (
                 <EmptyState
                   title="Sem histórico suficiente"
                   description="São necessários pelo menos 2 meses de compras para gerar o gráfico."
@@ -392,17 +410,17 @@ export default function CustomerDetailPage({
             Produtos mais comprados
           </SectionTitle>
 
-          {data.topProducts.length === 0 ? (
+          {(data.topProducts ?? []).length === 0 ? (
             <EmptyState
               title="Sem dados de produtos"
               description="Nenhum produto registrado para este cliente."
             />
           ) : (
-            <Card className="rounded-2xl shadow-sm">
+            <Card className="rounded-2xl shadow-sm py-0">
               <CardContent className="p-0">
                 <div className="divide-y divide-border">
                   {data.topProducts.map((p, i) => (
-                    <div key={p.product} className="flex items-center gap-4 px-6 py-3.5 transition-colors hover:bg-accent/40">
+                    <div key={p.product} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-accent/40 sm:px-6 sm:py-3.5">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-primary tabular-nums">
                         {i + 1}
                       </span>
@@ -430,18 +448,18 @@ export default function CustomerDetailPage({
         </div>
 
         {/* ── Alertas / Oportunidades ──────────────────────────────────────── */}
-        {data.alerts.length > 0 && (
+        {alerts.length > 0 && (
           <div>
             <SectionTitle icon={<AlertTriangle className="h-4 w-4" />}>
               Alertas e oportunidades
             </SectionTitle>
             <div className="space-y-3">
-              {data.alerts.map((alert) => {
+              {alerts.map((alert) => {
                 const conf = CONFIDENCE_CONFIG[alert.confidence]
                 return (
                   <div
                     key={alert.id}
-                    className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-all hover:shadow-md"
+                    className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card px-4 py-3.5 shadow-sm transition-all hover:shadow-md sm:px-5 sm:py-4"
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -479,12 +497,14 @@ export default function CustomerDetailPage({
           </DialogHeader>
           {msg.loading ? (
             <div className="space-y-2 py-4"><Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" /></div>
+          ) : msg.error ? (
+            <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive">{msg.error}</div>
           ) : (
             <Textarea className="min-h-[160px] resize-none text-sm" value={msg.text} onChange={(e) => setMsg((m) => ({ ...m, text: e.target.value }))} />
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsg((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msg.loading || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
+            <Button disabled={msg.loading || !!msg.error || !msg.text} onClick={() => navigator.clipboard.writeText(msg.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

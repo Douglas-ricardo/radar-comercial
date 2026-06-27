@@ -18,7 +18,8 @@ export function formatCurrency(value: number | undefined | null): string {
   return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: _activeCurrency,
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value ?? 0)
 }
 

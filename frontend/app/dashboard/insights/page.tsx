@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 
+import { OpportunityCard }  from '@/components/opportunities/opportunity-card'
 import { KpiCard, KpiCardSkeleton } from '@/components/insights/kpi-card'
 import { EmptyState }        from '@/components/insights/empty-state'
 import { ErrorState }        from '@/components/insights/error-state'
@@ -51,21 +52,15 @@ const OPPORTUNITY_TYPE_LABELS: Record<Opportunity['type'], string> = {
   seasonal_gap: 'Gap sazonal', product_gap: 'Gap de produto',
 }
 
-const CONFIDENCE_CONFIG: Record<Opportunity['confidence'], { className: string; label: string }> = {
-  high:   { className: 'bg-success/10 text-success',     label: 'Alta' },
-  medium: { className: 'bg-warning/10 text-warning',     label: 'Média' },
-  low:    { className: 'bg-muted text-muted-foreground', label: 'Baixa' },
-}
-
 const DATE_RANGE_OPTIONS = [
   { value: '1m', label: 'Último mês' }, { value: '3m', label: 'Últimos 3 meses' },
   { value: '6m', label: 'Últimos 6 meses' }, { value: '12m', label: 'Último ano' },
 ]
 
 const SORT_OPTIONS = [
-  { value: 'value',    label: 'Maior valor' },
-  { value: 'recovery', label: 'Mais recuperável' },
-  { value: 'priority', label: 'Prioridade (valor × recuperação)' },
+  { value: 'value',    label: 'Maior valor',                       short: 'Maior valor' },
+  { value: 'recovery', label: 'Mais recuperável',                  short: 'Mais recuperável' },
+  { value: 'priority', label: 'Prioridade (valor × recuperação)',  short: 'Prioridade' },
 ] as const
 
 // Campos de recuperabilidade já fazem parte de Opportunity (types/index.ts).
@@ -78,11 +73,6 @@ const RECOVERY_BAND_CONFIG: Record<RecoveryBand, { className: string; label: str
 }
 
 // ─── Sub-componentes ─────────────────────────────────────────────────────────
-
-function ConfidenceBadge({ confidence }: { confidence: Opportunity['confidence'] }) {
-  const { className, label } = CONFIDENCE_CONFIG[confidence]
-  return <Badge className={cn('text-xs font-medium border-0', className)}>{label}</Badge>
-}
 
 function RecoveryBadge({ band, score }: { band?: RecoveryBand; score?: number }) {
   if (!band || score === undefined) return null
@@ -120,13 +110,13 @@ export default function InsightsPage() {
   const [dateRange, setDateRange] = useState('6m')
   const [tab, setTab] = useState('oportunidades')
   const [filterType, setFilterType] = useState<'all' | Opportunity['type']>('all')
-  const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
+  const [filterBand, setFilterBand] = useState<'all' | RecoveryBand>('all')
   const [minValue, setMinValue] = useState('')
   const [sortBy, setSortBy] = useState<'value' | 'recovery' | 'priority'>('priority')
   const [showFilters, setShowFilters] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
-  const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean }>({
+  const [msgModal, setMsgModal] = useState<{ open: boolean; text: string; loading: boolean; error?: string }>({
     open: false, text: '', loading: false,
   })
 
@@ -134,10 +124,10 @@ export default function InsightsPage() {
 
   const summary = data?.summary
   const opportunities = data?.opportunities ?? []
-  const timeSeries = data?.charts.timeSeries ?? []
-  const customerDistribution = data?.charts.customerDistribution ?? []
-  const productGaps = data?.charts.productGaps ?? []
-  const seasonalityData = data?.charts.seasonality ?? []
+  const timeSeries = data?.charts?.timeSeries ?? []
+  const customerDistribution = data?.charts?.customerDistribution ?? []
+  const productGaps = data?.charts?.productGaps ?? []
+  const seasonalityData = data?.charts?.seasonality ?? []
 
   const minValueNum = minValue ? parseFloat(minValue) : 0
   const sortKey = (o: Opportunity) =>
@@ -147,7 +137,7 @@ export default function InsightsPage() {
   const filteredOpportunities = opportunities
     .filter((o) => {
       if (filterType !== 'all' && o.type !== filterType) return false
-      if (filterConfidence !== 'all' && o.confidence !== filterConfidence) return false
+      if (filterBand !== 'all' && o.recoveryBand !== filterBand) return false
       if (minValueNum > 0 && o.expectedValue < minValueNum) return false
       return true
     })
@@ -173,13 +163,13 @@ export default function InsightsPage() {
     try {
       const res = await opportunitiesApi.generateMessage(opp.id, customerHash, dateRange)
       if (res.success && res.data) {
-        setMsgModal({ open: true, loading: false, text: res.data.message })
+        setMsgModal({ open: true, loading: false, text: res.data.message, error: undefined })
         toast.success('Mensagem gerada.')
       } else {
-        setMsgModal({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+        setMsgModal({ open: true, loading: false, text: '', error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
       }
     } catch {
-      setMsgModal({ open: true, loading: false, text: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
+      setMsgModal({ open: true, loading: false, text: '', error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
 
@@ -210,7 +200,7 @@ export default function InsightsPage() {
     <div className="flex flex-col min-h-screen">
       <DashboardHeader title="Insights" description="Do panorama ao detalhe — comece pelos achados." />
 
-      <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
+      <div className="flex-1 space-y-4 sm:space-y-5 p-4 sm:p-6 lg:p-8 max-w-[1320px] mx-auto w-full">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Select value={dateRange} onValueChange={setDateRange}>
@@ -236,10 +226,10 @@ export default function InsightsPage() {
         ) : findings.length > 0 && (
           <div>
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">O que encontramos</h2>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
               {findings.map((f, i) => (
-                <Card key={i} className="flex flex-col justify-between rounded-2xl shadow-sm transition-all hover:shadow-md">
-                  <CardContent className="pt-6">
+                <Card key={i} className="flex flex-col justify-between rounded-2xl shadow-sm transition-all hover:shadow-md py-0">
+                  <CardContent className="pt-5 sm:pt-6">
                     <p className={cn('font-[family-name:var(--font-display)] tracking-[-0.02em] tabular-nums', f.tone, f.serif ? 'text-3xl font-extrabold leading-none' : 'text-2xl font-bold')}>{f.value}</p>
                     <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{f.text}</p>
                   </CardContent>
@@ -255,7 +245,7 @@ export default function InsightsPage() {
         )}
 
         {/* KPIs de apoio (mono) */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
           {isLoading ? Array.from({ length: 4 }).map((_, i) => <KpiCardSkeleton key={i} />) : (
             <>
               <KpiCard label="Receita total" value={formatCurrency(summary?.totalRevenue)} icon={<DollarSign className="h-4 w-4" />} />
@@ -281,7 +271,11 @@ export default function InsightsPage() {
             <div className="flex flex-wrap items-center gap-2">
               {/* Ordenação — controle principal do vendedor */}
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
-                <SelectTrigger className="h-9 w-[230px] text-sm bg-card"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 w-[190px] text-sm bg-card">
+                  <span className="truncate text-muted-foreground">
+                    Ordenar: <span className="text-foreground">{SORT_OPTIONS.find((o) => o.value === sortBy)?.short}</span>
+                  </span>
+                </SelectTrigger>
                 <SelectContent>
                   {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                 </SelectContent>
@@ -295,7 +289,7 @@ export default function InsightsPage() {
               >
                 <Filter className="h-3.5 w-3.5" />
                 Filtrar
-                {(filterType !== 'all' || filterConfidence !== 'all' || minValue) && (
+                {(filterType !== 'all' || filterBand !== 'all' || minValue) && (
                   <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
                 )}
               </Button>
@@ -310,33 +304,59 @@ export default function InsightsPage() {
                     {(Object.entries(OPPORTUNITY_TYPE_LABELS) as [Opportunity['type'], string][]).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={filterConfidence} onValueChange={(v) => setFilterConfidence(v as typeof filterConfidence)}>
-                  <SelectTrigger className="h-8 w-[145px] text-sm bg-card"><SelectValue placeholder="Confiança" /></SelectTrigger>
+                <Select value={filterBand} onValueChange={(v) => setFilterBand(v as typeof filterBand)}>
+                  <SelectTrigger className="h-8 w-[160px] text-sm bg-card"><SelectValue placeholder="Recuperação" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Toda confiança</SelectItem>
-                    <SelectItem value="high">Alta</SelectItem>
-                    <SelectItem value="medium">Média</SelectItem>
-                    <SelectItem value="low">Baixa</SelectItem>
+                    <SelectItem value="all">Toda recuperação</SelectItem>
+                    <SelectItem value="alta">Alta recuperação</SelectItem>
+                    <SelectItem value="media">Média recuperação</SelectItem>
+                    <SelectItem value="baixa">Baixa recuperação</SelectItem>
                   </SelectContent>
                 </Select>
                 <Input type="number" min="0" placeholder="Valor mínimo R$" value={minValue} onChange={(e) => setMinValue(e.target.value)} className="h-8 w-[145px] text-sm bg-card" />
               </div>
             )}
 
-            <Card className="rounded-2xl shadow-sm">
-              <CardContent className="p-0">
-                {isLoading ? (
+            {isLoading ? (
+              <Card className="rounded-2xl shadow-sm py-0">
+                <CardContent className="p-0">
                   <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-muted" />)}</div>
-                ) : filteredOpportunities.length === 0 ? (
+                </CardContent>
+              </Card>
+            ) : filteredOpportunities.length === 0 ? (
+              <Card className="rounded-2xl shadow-sm py-0">
+                <CardContent className="p-0">
                   <EmptyState title="Nenhuma oportunidade" description="Ajuste os filtros ou faça um novo upload." />
-                ) : (
-                  <Table>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* Mobile: tabela vira lista de cards (4 colunas não cabem em 360–402px) */}
+                <div className="space-y-3 md:hidden">
+                  {filteredOpportunities.map((opp) => (
+                    <OpportunityCard
+                      key={opp.id}
+                      customer={opp.customer}
+                      expectedValue={opp.expectedValue}
+                      product={opp.product}
+                      frequency={opp.frequency}
+                      recoveryScore={opp.recoveryScore}
+                      recoveryBand={opp.recoveryBand}
+                      recoveryReasons={opp.recoveryReasons}
+                      onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
+                    />
+                  ))}
+                </div>
+
+                {/* Desktop: tabela completa */}
+                <Card className="hidden rounded-2xl shadow-sm py-0 md:block">
+                  <CardContent className="p-0">
+                    <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent bg-muted/30">
                         <TableHead className="pl-6 h-10 text-xs uppercase tracking-wider text-muted-foreground">Cliente</TableHead>
                         <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right">Potencial</TableHead>
                         <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right pr-2">Recuperação</TableHead>
-                        <TableHead className="h-10 text-xs uppercase tracking-wider text-muted-foreground text-right pr-2">Confiança</TableHead>
                         <TableHead className="h-10 w-10 pr-6" />
                       </TableRow>
                     </TableHeader>
@@ -347,12 +367,11 @@ export default function InsightsPage() {
                             <TableCell className="pl-6 font-medium">{opp.customer}</TableCell>
                             <TableCell className="text-right font-semibold tabular-nums text-primary">{formatCurrency(opp.expectedValue)}</TableCell>
                             <TableCell className="text-right pr-2"><RecoveryBadge band={opp.recoveryBand} score={opp.recoveryScore} /></TableCell>
-                            <TableCell className="text-right pr-2"><ConfidenceBadge confidence={opp.confidence} /></TableCell>
                             <TableCell className="w-10 pr-6"><ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform ml-auto', expanded === opp.id && 'rotate-180')} /></TableCell>
                           </TableRow>
                           {expanded === opp.id && (
                             <TableRow className="bg-muted/20 hover:bg-muted/20">
-                              <TableCell colSpan={5} className="px-6 py-4">
+                              <TableCell colSpan={4} className="px-6 py-4">
                                 <div className="grid gap-3 sm:grid-cols-4 text-sm">
                                   <div><p className="text-xs text-muted-foreground">Produto</p><p className="font-medium">{opp.product ?? 'Geral'}</p></div>
                                   <div><p className="text-xs text-muted-foreground">Tipo</p><p className="font-medium">{OPPORTUNITY_TYPE_LABELS[opp.type]}</p></div>
@@ -384,16 +403,17 @@ export default function InsightsPage() {
                         </Fragment>
                       ))}
                     </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           {/* ── Análise: gráficos de apoio + clientes + sazonalidade ── */}
           <TabsContent value="analise" className="space-y-6">
             <Card className="rounded-2xl shadow-sm">
-              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Receita vs. receita perdida</CardTitle><CardDescription>Evolução ao longo do tempo</CardDescription></CardHeader>
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Receita vs. receita perdida</CardTitle><CardDescription>Evolução ao longo do tempo</CardDescription></CardHeader>
               <CardContent>
                 {isLoading ? <ChartSkeleton height={300} /> : (
                   <div className="h-[300px]">
@@ -417,9 +437,9 @@ export default function InsightsPage() {
               </CardContent>
             </Card>
 
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
               <Card className="rounded-2xl shadow-sm">
-                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Gap de produtos</CardTitle><CardDescription>Esperado versus realizado</CardDescription></CardHeader>
+                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Gap de produtos</CardTitle><CardDescription>Esperado versus realizado</CardDescription></CardHeader>
                 <CardContent>
                   {isLoading ? <ChartSkeleton height={280} /> : productGaps.length === 0 ? <EmptyState title="Sem gaps" description="Nada significativo no período." /> : (
                     <div className="h-[280px]">
@@ -438,7 +458,7 @@ export default function InsightsPage() {
               </Card>
 
               <Card className="rounded-2xl shadow-sm">
-                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Distribuição por cliente</CardTitle><CardDescription>Participação na receita</CardDescription></CardHeader>
+                <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Distribuição por cliente</CardTitle><CardDescription>Participação na receita</CardDescription></CardHeader>
                 <CardContent>
                   {isLoading ? <ChartSkeleton height={280} /> : customerDistribution.length === 0 ? <EmptyState title="Sem dados" description="Faça upload de uma base." /> : (
                     <div className="h-[280px]">
@@ -459,7 +479,7 @@ export default function InsightsPage() {
 
             {/* Clientes — lista enxuta */}
             <Card className="rounded-2xl shadow-sm">
-              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Desempenho de clientes</CardTitle><CardDescription>Clique para ver o perfil completo</CardDescription></CardHeader>
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Desempenho de clientes</CardTitle><CardDescription>Clique para ver o perfil completo</CardDescription></CardHeader>
               <CardContent className="p-0">
                 {isLoading ? <div className="space-y-px p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-muted" />)}</div> : customerDistribution.length === 0 ? (
                   <EmptyState title="Sem dados de clientes" description="Faça upload de uma base." action={{ label: 'Importar dados', onClick: () => router.push('/dashboard/upload') }} />
@@ -492,7 +512,7 @@ export default function InsightsPage() {
 
             {/* Sazonalidade */}
             <Card className="rounded-2xl shadow-sm">
-              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.02em]">Sazonalidade</CardTitle><CardDescription>Atual versus média histórica</CardDescription></CardHeader>
+              <CardHeader className="pb-4"><CardTitle className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.02em]">Sazonalidade</CardTitle><CardDescription>Atual versus média histórica</CardDescription></CardHeader>
               <CardContent>
                 {isLoading ? <ChartSkeleton height={300} /> : seasonalityData.length === 0 ? <EmptyState title="Sem sazonalidade" description="São necessários 12+ meses de histórico." /> : (
                   <div className="h-[300px]">
@@ -522,10 +542,10 @@ export default function InsightsPage() {
       <Dialog open={msgModal.open} onOpenChange={(open) => setMsgModal((m) => ({ ...m, open }))}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Mensagem para WhatsApp</DialogTitle></DialogHeader>
-          {msgModal.loading ? <div className="space-y-2 py-4"><Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" /></div> : <Textarea className="min-h-[160px] resize-none text-sm" value={msgModal.text} onChange={(e) => setMsgModal((m) => ({ ...m, text: e.target.value }))} />}
+          {msgModal.loading ? <div className="space-y-2 py-4"><Skeleton className="h-4 w-full bg-muted" /><Skeleton className="h-4 w-5/6 bg-muted" /><Skeleton className="h-4 w-4/6 bg-muted" /></div> : msgModal.error ? <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive">{msgModal.error}</div> : <Textarea className="min-h-[160px] resize-none text-sm" value={msgModal.text} onChange={(e) => setMsgModal((m) => ({ ...m, text: e.target.value }))} />}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setMsgModal((m) => ({ ...m, open: false }))}>Fechar</Button>
-            <Button disabled={msgModal.loading || !msgModal.text} onClick={() => navigator.clipboard.writeText(msgModal.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
+            <Button disabled={msgModal.loading || !!msgModal.error || !msgModal.text} onClick={() => navigator.clipboard.writeText(msgModal.text).then(() => toast.success('Mensagem copiada.')).catch(() => toast.error('Não foi possível copiar.'))}>Copiar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -138,6 +138,33 @@ def test_expected_value_identico_entre_lista_e_perfil():
     assert opp["expectedValue"] == prof["alerts"][0]["expectedValue"]
 
 
+def test_persistencia_popula_fonte_unica_e_bate_com_oportunidade(db, company_a):
+    """PASSO 1 (raiz): após o mapeamento REAL de persistência (customer_profile_row),
+    o CustomerProfile tem status/expected_value/recovery populados, e o expected_value
+    persistido é IDÊNTICO ao expectedValue da lista de oportunidades para o mesmo cliente."""
+    from app.workers.tasks import customer_profile_row
+    from app.domain.models import CustomerProfile
+
+    cid = company_a["company"].id
+    df = _build_two_customer_df()
+    insights = generate_dynamic_insights(df, "12m", cycle_days=90)
+    opp = next(o for o in insights["opportunities"] if o["customer"] == "Recorrente")
+    profiles = build_customer_profiles(df, cycle_days=90)
+
+    # Persiste pelo MESMO mapeamento usado pela task (sem duplicar lógica).
+    db.query(CustomerProfile).filter_by(company_id=cid).delete()
+    db.bulk_save_objects([customer_profile_row(cid, p) for p in profiles])
+    db.commit()
+
+    row = db.query(CustomerProfile).filter_by(company_id=cid, customer_name="Recorrente").first()
+    assert row is not None
+    assert row.status == "churned"                 # fonte única persistida
+    assert row.expected_value > 0
+    assert row.recovery_score >= 0 and row.recovery_band in ("alta", "media", "baixa")
+    # Consistência ponta-a-ponta: valor persistido == valor da oportunidade (sem recálculo).
+    assert row.expected_value == opp["expectedValue"]
+
+
 def test_cliente_active_nao_vira_oportunidade():
     df = _build_two_customer_df()
     insights = generate_dynamic_insights(df, "12m", cycle_days=90)

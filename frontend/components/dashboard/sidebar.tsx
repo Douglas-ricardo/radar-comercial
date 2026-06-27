@@ -8,21 +8,10 @@ import { Logo } from '@/components/common/logo'
 import { useAuth } from '@/lib/auth/auth-context'
 import { api } from '@/lib/api/client'
 import {
-  LayoutDashboard,
-  LineChart,
-  Users,
-  Settings,
-  HelpCircle,
   ChevronLeft,
   ChevronRight,
   Sparkles,
   Crown,
-  Briefcase,
-  Plug2,
-  Send,
-  CreditCard,
-  Megaphone,
-  type LucideIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState, useEffect } from 'react'
@@ -32,41 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-
-type Role = 'admin' | 'analyst' | 'viewer'
-type NavEntry = { name: string; href: string; icon: LucideIcon; badge: string | null; roles?: Role[] }
-
-// roles ausente = todos os papéis têm acesso
-const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
-  {
-    label: 'Operação',
-    items: [
-      { name: 'Visão geral', href: '/dashboard', icon: LayoutDashboard, badge: null },
-      { name: 'Carteira', href: '/dashboard/carteira', icon: Briefcase, badge: null },
-      { name: 'Disparo', href: '/dashboard/disparo', icon: Send, badge: null, roles: ['admin', 'analyst'] },
-      { name: 'Campanhas', href: '/dashboard/campanhas', icon: Megaphone, badge: null, roles: ['admin', 'analyst'] },
-    ],
-  },
-  {
-    label: 'Análise',
-    items: [
-      { name: 'Insights', href: '/dashboard/insights', icon: LineChart, badge: null },
-    ],
-  },
-  {
-    label: 'Conta',
-    items: [
-      { name: 'Equipe', href: '/dashboard/team', icon: Users, badge: null, roles: ['admin'] },
-      { name: 'Integrações', href: '/dashboard/integrations', icon: Plug2, badge: null, roles: ['admin'] },
-      { name: 'Faturamento', href: '/dashboard/billing', icon: CreditCard, badge: null, roles: ['admin'] },
-      { name: 'Configurações', href: '/dashboard/settings', icon: Settings, badge: null },
-    ],
-  },
-]
-
-const secondaryNavigation: { name: string; href: string; icon: LucideIcon }[] = [
-  { name: 'Ajuda', href: '/dashboard/help', icon: HelpCircle },
-]
+import { NAV_GROUPS, SECONDARY_NAV, type NavEntry, type Role } from '@/components/dashboard/nav-items'
 
 interface NavItemProps {
   item: NavEntry
@@ -168,7 +123,7 @@ export function DashboardSidebar() {
     <TooltipProvider>
       <aside
         className={cn(
-          'flex h-screen flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300',
+          'hidden h-screen flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 md:flex',
           collapsed ? 'w-16' : 'w-64'
         )}
         aria-label="Navegação principal"
@@ -307,7 +262,7 @@ export function DashboardSidebar() {
 
         {/* Navegação secundária */}
         <div className="border-t border-sidebar-border px-2 py-3">
-          {secondaryNavigation.map((item) => {
+          {SECONDARY_NAV.map((item) => {
             const content = (
               <Link
                 key={item.name}

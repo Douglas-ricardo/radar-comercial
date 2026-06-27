@@ -36,7 +36,7 @@ export function KpiCard({ label, value, delta, icon, variant = 'default' }: KpiC
       <CardContent className="space-y-1">
         <p
           className={cn(
-            'font-mono text-2xl leading-none tracking-tight tabular-nums',
+            'font-mono text-2xl sm:text-3xl leading-none tracking-tight tabular-nums',
             variant === 'danger' ? 'text-destructive' : 'text-foreground'
           )}
           aria-label={`${label}: ${value}`}
