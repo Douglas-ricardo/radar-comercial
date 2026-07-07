@@ -29,7 +29,74 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/integrations", tags=["Integrations"])
 ingest_router = APIRouter(prefix="/api/data", tags=["Ingest"])
 
-_TEMP_DIR = Path(os.getenv("TEMP_DIR", str(Path(__file__).resolve().parent.parent.parent / "temp")))
+# `or` (não default do getenv): TEMP_DIR="" no .env viraria Path("") = cwd (backend root),
+# espalhando os buffers de ingestão no repo. Vazio → cai no padrão backend/temp/ (gitignored).
+_TEMP_DIR = Path(os.getenv("TEMP_DIR") or str(Path(__file__).resolve().parent.parent.parent / "temp"))
+
+# ── Buffer acumulativo de ingestão ────────────────────────────────────────────
+# O pipeline de análise faz REPLACE TOTAL dos perfis a partir do arquivo processado.
+# Lotes incrementais do ERP (n8n manda só as vendas do dia) portanto NÃO podem ser
+# processados isoladamente — apagariam a base a cada lote. Cada lote é ACUMULADO
+# num buffer por empresa e o pipeline processa o buffer inteiro.
+_INGEST_FIELDS = ["data", "cliente", "produto", "quantidade", "valor", "telefone", "email"]
+_INGEST_BUFFER_MAX_ROWS = int(os.getenv("INGEST_BUFFER_MAX_ROWS", "200000"))
+_INGEST_LOCK_TTL = 120
+
+
+def _ingest_buffer_key(company_id: str) -> str:
+    return f"ingest/{company_id}/cumulative.csv"
+
+
+def _ingest_buffer_local(company_id: str) -> str:
+    # Path DETERMINÍSTICO: no modo disco (sem R2), store_from_local devolve o
+    # próprio path — precisa ser estável entre lotes para o buffer acumular.
+    return str(_TEMP_DIR / f"ingest_buffer_{company_id}.csv")
+
+
+def _ingest_buffer_ref(company_id: str) -> str:
+    if storage.REMOTE_ENABLED:
+        return f"r2://{_ingest_buffer_key(company_id)}"
+    return _ingest_buffer_local(company_id)
+
+
+def merge_into_ingest_buffer(company_id: str, records) -> str:
+    """
+    Acrescenta os registros ao buffer acumulado da empresa e retorna o ref
+    pronto para o pipeline. Mantém no máximo _INGEST_BUFFER_MAX_ROWS linhas
+    (descarta as MAIS ANTIGAS — lotes de ERP chegam em ordem cronológica).
+    O chamador deve segurar o lock ingest_buffer:{company_id}.
+    """
+    _TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    ref = _ingest_buffer_ref(company_id)
+
+    old_rows: list[str] = []
+    if storage.source_exists(ref):
+        local_copy = storage.fetch_to_local(ref)
+        with open(local_copy, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        old_rows = lines[1:] if lines else []  # descarta o header antigo
+        if storage.is_remote_ref(ref):
+            storage.cleanup_local(local_copy)
+
+    merged_path = _ingest_buffer_local(company_id)
+    tmp_path = merged_path + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(_INGEST_FIELDS)
+        excess = len(old_rows) + len(records) - _INGEST_BUFFER_MAX_ROWS
+        if excess > 0:
+            logger.warning(
+                "integrations.ingest.buffer_trimmed",
+                extra={"company_id": company_id, "dropped_oldest": excess},
+            )
+            old_rows = old_rows[excess:]
+        for line in old_rows:
+            f.write(line + "\n")
+        for r in records:
+            writer.writerow([r.data, r.cliente, r.produto, r.quantidade, r.valor,
+                             r.telefone or "", r.email or ""])
+    os.replace(tmp_path, merged_path)
+    return storage.store_from_local(merged_path, _ingest_buffer_key(company_id))
 
 
 def _hash_key(plaintext: str) -> str:
@@ -46,6 +113,9 @@ class SaleRecord(BaseModel):
     produto: Optional[str] = "Geral"
     quantidade: Optional[float] = 1.0
     valor: float
+    # Contato do cliente final (opcional) — habilita o disparo WhatsApp/email
+    telefone: Optional[str] = None
+    email: Optional[str] = None
 
 
 class IngestRequest(BaseModel):
@@ -262,36 +332,44 @@ def ingest_data(
         raise HTTPException(status_code=403, detail="Limite de uploads do plano atingido.")
     db.commit()
 
-    _TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = str(_TEMP_DIR / f"ingest_{company_id}_{uuid.uuid4().hex[:8]}.csv")
-
+    # Acumula o lote no buffer da empresa (lock: dois lotes concorrentes não
+    # podem se sobrescrever) e processa o buffer INTEIRO — ingest é incremental.
+    from app.infrastructure.redis_client import redis_client
+    lock = redis_client.lock(
+        f"ingest_buffer:{company_id}", timeout=_INGEST_LOCK_TTL, blocking_timeout=10
+    )
+    if not lock.acquire():
+        raise HTTPException(status_code=429, detail="Outra ingestão em andamento. Tente novamente.")
     try:
-        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["data", "cliente", "produto", "quantidade", "valor"])
-            writer.writeheader()
-            for r in body.records:
-                writer.writerow({
-                    "data": r.data,
-                    "cliente": r.cliente,
-                    "produto": r.produto,
-                    "quantidade": r.quantidade,
-                    "valor": r.valor,
-                })
+        file_ref = merge_into_ingest_buffer(company_id, body.records)
     except Exception as exc:
         logger.error("integrations.ingest.write_error", extra={"company_id": company_id, "error": str(exc)})
         raise HTTPException(status_code=500, detail="Erro ao processar registros.")
+    finally:
+        try:
+            lock.release()
+        except Exception:
+            pass
 
     file_record = UploadedFile(
         company_id=company_id,
         filename=f"api_ingest_{utcnow().strftime('%Y%m%d_%H%M%S')}.csv",
         status="pending",
+        source_ref=file_ref,  # habilita reprocessar o buffer acumulado
     )
     db.add(file_record)
     db.commit()
     db.refresh(file_record)
 
-    file_ref = storage.store_from_local(tmp_path, f"ingest/{company_id}/{file_record.id}.csv")
-    process_sales_file.delay(file_record.id, company_id, file_ref)
+    # preserve_source: o buffer acumulado NUNCA é apagado pelo worker — os
+    # próximos lotes dependem dele (retenção controlada por INGEST_BUFFER_MAX_ROWS).
+    # guard_base_shrink: se o buffer ainda não cobre a base atual (empresa fez
+    # upload manual e conectou o ERP sem backfill), falha com instrução clara
+    # em vez de substituir a base por um recorte menor.
+    process_sales_file.delay(
+        file_record.id, company_id, file_ref,
+        preserve_source=True, guard_base_shrink=True,
+    )
 
     logger.info(
         "integrations.ingest.dispatched",

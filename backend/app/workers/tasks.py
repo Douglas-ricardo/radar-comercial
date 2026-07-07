@@ -23,6 +23,13 @@ _ETL_LOCK_WAIT = 5
 # Padrão FALSE = não reter transação bruta (decisão LGPD). Ligar conscientemente.
 _RETAIN_SOURCE = os.getenv("RETAIN_SOURCE_FILES", "false").lower() == "true"
 
+# Guarda de encolhimento (ingest incremental): se a carga via API resultaria em
+# menos da METADE dos clientes da base atual (e a base é relevante), aborta em
+# vez de substituir — protege quem fez upload manual e conectou o ERP depois
+# sem backfill. Upload manual NÃO passa por esta guarda (substituir é intencional).
+_SHRINK_GUARD_MIN_BASE = int(os.getenv("INGEST_SHRINK_GUARD_MIN_BASE", "10"))
+_SHRINK_GUARD_RATIO = float(os.getenv("INGEST_SHRINK_GUARD_RATIO", "0.5"))
+
 
 def customer_profile_row(company_id: str, p: dict, *, preserved=(None, None, False), opted_out=frozenset()) -> CustomerProfile:
     """Mapeia o dict de perfil (saída de build_customer_profiles) para a linha CustomerProfile.
@@ -66,10 +73,18 @@ def customer_profile_row(company_id: str, p: dict, *, preserved=(None, None, Fal
 
 
 @celery_app.task(bind=True, max_retries=3, soft_time_limit=1500, time_limit=1800)
-def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
+def process_sales_file(
+    self, file_id: str, company_id: str, file_ref: str,
+    preserve_source: bool = False, guard_base_shrink: bool = False,
+):
     """
     file_ref pode ser um path local (fallback) ou "r2://<key>" (object storage).
     O worker baixa para um path local antes de processar e limpa ao final.
+
+    preserve_source=True (ingest incremental, reprocess): a fonte NUNCA é apagada
+    pelo worker — o buffer acumulado de ingestão é necessário para os próximos lotes.
+    guard_base_shrink=True (ingest): aborta se o resultado encolheria a base de
+    clientes drasticamente (ver _SHRINK_GUARD_*).
     """
     logger.info("worker.task.start", extra={"file_id": file_id, "company_id": company_id})
 
@@ -88,6 +103,23 @@ def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
         company_obj = db.query(Company).filter(Company.id == company_id).first()
         cycle_days = company_obj.purchase_cycle_days if company_obj else 90
         result = process_sales_pipeline(local_file_path, company_id, cycle_days=cycle_days)
+
+        if guard_base_shrink:
+            existing_profiles = (
+                db.query(CustomerProfile).filter_by(company_id=company_id).count()
+            )
+            new_profiles_count = len(result["customer_profiles"])
+            if (
+                existing_profiles >= _SHRINK_GUARD_MIN_BASE
+                and new_profiles_count < existing_profiles * _SHRINK_GUARD_RATIO
+            ):
+                # ValueError → sem retry; mensagem vai para o card do arquivo.
+                raise ValueError(
+                    f"A carga via API resultaria em {new_profiles_count} clientes, mas a base "
+                    f"atual tem {existing_profiles}. Para proteger seus dados, NADA foi alterado. "
+                    "Envie primeiro uma carga inicial completa do histórico (backfill) via API — "
+                    "os lotes diários passam a somar a partir dela."
+                )
 
         # ── ComputedInsights: upsert per (company_id, date_range) ─────────────
         for date_range, insights in result["insights_by_range"].items():
@@ -215,6 +247,11 @@ def process_sales_file(self, file_id: str, company_id: str, file_ref: str):
         except Exception:
             # lock pode ter expirado por TTL — não é erro fatal
             pass
+
+        if preserve_source:
+            # Fonte protegida (buffer de ingest / reprocess) — vence qualquer
+            # decisão anterior, inclusive o "pode deletar" pós-MaxRetries.
+            should_delete_file = False
 
         if storage.is_remote_ref(file_ref):
             # A cópia local baixada é sempre descartável (re-baixa em retry).

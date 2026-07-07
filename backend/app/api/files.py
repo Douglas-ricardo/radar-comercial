@@ -253,7 +253,9 @@ def reprocess_file(
     db_file.status = "processing"
     db_file.error_message = None
     db.commit()
-    process_sales_file.delay(file_id, token_data.company_id, db_file.source_ref)
+    # preserve_source: reprocessar nunca apaga a própria fonte (retida por opt-in
+    # ou buffer de ingest) — a política de deleção pertence ao fluxo original.
+    process_sales_file.delay(file_id, token_data.company_id, db_file.source_ref, preserve_source=True)
     return {"success": True, "data": {"id": file_id, "status": "processing"}}
 
 

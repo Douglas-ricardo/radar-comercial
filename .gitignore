@@ -32,6 +32,8 @@ backend/test_csvs/
 
 # ── Uploads temporários (UUID-named CSVs no backend root) ─────────────────────
 backend/*_vendas.csv
+backend/*_vendas_erp*.csv
+backend/ingest_buffer_*.csv
 narrativa.csv
 
 # ── Markdown (documentação interna — não versionar) ───────────────────────────
