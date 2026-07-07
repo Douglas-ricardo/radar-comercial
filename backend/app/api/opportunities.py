@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_analyst_or_above
 from app.core.rate_limit import limiter
 from app.domain.models import ComputedInsights, CustomerProfile
+from app.services.live_recency import refresh_days_inactive, company_dataset_max
 from app.infrastructure.database import get_db_session
 from app.infrastructure.redis_client import redis_client
 
@@ -154,7 +155,10 @@ def generate_message(
 
     opp: dict = {}
     if insights and insights.opportunities:
-        for o in insights.opportunities:
+        # Recência viva: o prompt da IA menciona "dias sem comprar" — refresca contra
+        # hoje (gated por frescor) antes de escolher a opp, igual ao dashboard.
+        dataset_max = company_dataset_max(db, company_id)
+        for o in refresh_days_inactive(insights.opportunities, dataset_max):
             if o.get("customerHash") == data.customer_hash:
                 opp = o
                 break

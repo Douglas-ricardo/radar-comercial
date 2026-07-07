@@ -8,6 +8,7 @@ from app.core.clock import utcnow
 from app.infrastructure.database import SessionLocal
 from app.domain.models import Company, ComputedInsights, NotificationPreference, ScheduledReport, User
 from app.services.notification_service import NotificationService
+from app.services.live_recency import refresh_days_inactive, company_dataset_max
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,11 @@ def send_daily_notifications(self):
                 if not insights or not insights.opportunities:
                     continue
 
+                # Recência viva (gated por frescor) antes de montar o digest — o
+                # email/WhatsApp ao vendedor mostra "dias sem comprar" atualizado.
+                dataset_max = company_dataset_max(db, pref.company_id)
                 opportunities = [
-                    opp for opp in insights.opportunities
+                    opp for opp in refresh_days_inactive(insights.opportunities, dataset_max)
                     if opp.get("expectedValue", 0) >= pref.min_opportunity_value
                 ]
 

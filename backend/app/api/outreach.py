@@ -259,7 +259,10 @@ def preview_message(request: Request, response: Response, token=Depends(require_
     if not sample:
         return {"success": True, "data": {"message": None, "customerName": None,
                                           "reason": "Nenhum cliente elegível (sem contato ou todos em opt-out)."}}
-    message = outreach_service.generate_message(sample, cfg.sender_name)
+    message = outreach_service.generate_message(
+        sample, cfg.sender_name,
+        days_override=outreach_service._live_days_for(db, sample),
+    )
     ai = bool(__import__("os").getenv("ANTHROPIC_API_KEY")) and "xxxx" not in (__import__("os").getenv("ANTHROPIC_API_KEY") or "")
     return {"success": True, "data": {
         "message": message,

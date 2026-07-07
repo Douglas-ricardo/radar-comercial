@@ -19,6 +19,7 @@ from app.domain.models import (
     CadenceEnrollment,
 )
 from app.services.notification_service import NotificationService
+from app.services.live_recency import live_recency_days, company_dataset_max
 from app.services import evolution_client
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,18 @@ def _cache_key(profile: CustomerProfile) -> str:
     return f"outreach_msg:{profile.company_id}:{profile.customer_hash}:{computed}"
 
 
-def generate_message(profile: CustomerProfile, sender_name: str | None) -> str:
+def _live_days_for(db: Session, profile: CustomerProfile) -> int:
+    """Dias sem comprar ao vivo (gated por frescor) para um perfil."""
+    dataset_max = company_dataset_max(db, profile.company_id)
+    return live_recency_days(profile.last_purchase_date, profile.recency_days, dataset_max)
+
+
+def generate_message(
+    profile: CustomerProfile, sender_name: str | None, *, days_override: int | None = None
+) -> str:
     """Gera mensagem de reativação em pt-BR via Claude. Fallback estático se sem IA.
-    Cache Redis 72h por (company, customer, data de cômputo) — evita custo repetido."""
+    Cache Redis 72h por (company, customer, data de cômputo) — evita custo repetido.
+    `days_override`: dias sem comprar já refrescados (recência viva); None → valor gravado."""
     from app.infrastructure.redis_client import redis_client
     cache_key = _cache_key(profile)
     try:
@@ -57,7 +67,7 @@ def generate_message(profile: CustomerProfile, sender_name: str | None) -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     rfv = profile.rfv or {}
     segment = rfv.get("segment", "lost")
-    days = profile.recency_days or 0
+    days = days_override if days_override is not None else (profile.recency_days or 0)
     last_products = ", ".join(
         p.get("product", "") for p in (profile.top_products or [])[:2] if p.get("product")
     )
@@ -301,7 +311,9 @@ def dispatch_to_customer(
         return result
 
     if message is None:
-        message = generate_message(profile, config.sender_name)
+        message = generate_message(
+            profile, config.sender_name, days_override=_live_days_for(db, profile)
+        )
 
     result["whatsapp"] = _do_whatsapp(db, config, profile, message)
     result["email"] = _do_email(db, config, profile, message, company_name)
@@ -519,7 +531,9 @@ def process_due_enrollments(db: Session, company_id: str, company_name: str, lim
         steps = DEFAULT_CADENCE
         step = steps[enr.step_index] if enr.step_index < len(steps) else None
         if step is not None:
-            message = generate_message(profile, config.sender_name)
+            message = generate_message(
+                profile, config.sender_name, days_override=_live_days_for(db, profile)
+            )
             ok = None
             if step["channel"] == "whatsapp":
                 ok = _do_whatsapp(db, config, profile, message)

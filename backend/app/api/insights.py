@@ -13,6 +13,7 @@ from app.infrastructure.redis_client import redis_client
 from app.core.auth import get_current_user_and_company
 from app.domain.models import ComputedInsights, Company, CustomerProfile
 from app.services.pdf_report import build_insights_pdf
+from app.services.live_recency import refresh_days_inactive, company_dataset_max
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,19 @@ def get_insights(
 
     cache_key = f"insights:{company_id}:{date_range}"
 
+    # Frescor da recência viva: compra mais recente da EMPRESA inteira (inclui
+    # ativos, que não entram nas oportunidades mas mantêm o feed fresco).
+    dataset_max = company_dataset_max(db, company_id)
+
     try:
         cached = redis_client.get(cache_key)
         if cached:
             logger.info("insights.cache.hit", extra={"company_id": company_id, "date_range": date_range})
-            return {"success": True, "data": _sort_opportunities(json.loads(cached), sort)}
+            # Recência viva PÓS-cache: o JSON cacheado guarda os dias congelados;
+            # refrescar aqui garante que o cache de 900s não trave o "dias sem comprar".
+            cached_data = json.loads(cached)
+            cached_data["opportunities"] = refresh_days_inactive(cached_data.get("opportunities"), dataset_max)
+            return {"success": True, "data": _sort_opportunities(cached_data, sort)}
     except RedisError as exc:
         logger.warning("insights.redis.get_error", extra={"error": str(exc)})
 
@@ -88,11 +97,13 @@ def get_insights(
     }
 
     try:
-        # Cacheia a ordem base (value); a ordenação por sort é aplicada na resposta.
+        # Cacheia a ordem base (value) com os dias GRAVADOS; a recência viva e a
+        # ordenação por sort são aplicadas na resposta (não no que vai pro cache).
         redis_client.setex(cache_key, 900, json.dumps(insights_data, default=str))
     except RedisError as exc:
         logger.warning("insights.redis.set_error", extra={"error": str(exc)})
 
+    insights_data["opportunities"] = refresh_days_inactive(insights_data.get("opportunities"), dataset_max)
     return {"success": True, "data": _sort_opportunities(insights_data, sort)}
 
 
