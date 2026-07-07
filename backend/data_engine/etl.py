@@ -58,13 +58,22 @@ except AttributeError:
     _STRING_TYPES = (pl.Utf8,)
 
 
+def _strip_accents(s: str) -> str:
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+
+
 def _canon_key(col: str) -> str:
     """Normaliza nome de coluna p/ casar com CANONICAL_COLUMNS de forma robusta."""
-    c = col.strip().lower()
+    c = _strip_accents(str(col)).strip().lower()  # "Razão Social" → "razao social"
     c = re.sub(r"\(.*?\)", "", c)           # remove "(r$)", "(un)"
     c = re.sub(r"[\s\-]+", "_", c.strip())  # "data venda" -> "data_venda"
     c = re.sub(r"_+", "_", c).strip("_")    # colapsa underscores
     return c
+
+
+# Lookup com as PRÓPRIAS chaves canonizadas: chaves declaradas com espaço/hífen
+# ("data da venda", "e-mail") ficam alcançáveis pelo _canon_key do header.
+_CANONICAL_LOOKUP = {_canon_key(k): v for k, v in CANONICAL_COLUMNS.items()}
 
 
 def _build_rename_map(cols) -> dict:
@@ -77,7 +86,7 @@ def _build_rename_map(cols) -> dict:
     rename_map: dict[str, str] = {}
     seen_targets: set[str] = set()
     for c in cols:
-        canonical = CANONICAL_COLUMNS.get(_canon_key(c))
+        canonical = _CANONICAL_LOOKUP.get(_canon_key(c))
         if canonical is None:
             continue
         if canonical in seen_targets:
@@ -99,7 +108,8 @@ def normalize_columns(df: pl.DataFrame) -> pl.DataFrame:
 def normalize_customer_name(name: str) -> str:
     if not name:
         return ""
-    s = str(name).strip()
+    # " ".join(split()) colapsa espaços internos: "joão  da  silva" == "João da Silva"
+    s = " ".join(str(name).split())
     nfkd = unicodedata.normalize("NFKD", s)
     return nfkd.encode("ascii", "ignore").decode("ascii").lower().strip()
 
@@ -134,6 +144,16 @@ def _parse_dates_multi_format(df: pl.DataFrame) -> pl.DataFrame:
     total = df.height
     if total == 0:
         return df
+
+    # Descarta o componente de hora ("2026-02-10 10:30:00", "10/02/2026 14:22",
+    # ISO com T/timezone) — export típico de ERP/Excel. Sem isso, 100% das datas
+    # falhariam os formatos e o arquivo inteiro seria rejeitado.
+    df = df.with_columns(
+        pl.col("date")
+        .str.strip_chars()
+        .str.replace(r"[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?$", "")
+        .alias("date")
+    )
 
     # nulls por formato — só para o AVISO de ambiguidade (não escolhe vencedor)
     nulls_by_fmt = {
@@ -360,13 +380,28 @@ def _sniff_csv(file_path: str) -> tuple[str, str]:
     with open(file_path, "rb") as f:
         sample = f.read(65536)
 
-    try:
-        sample.decode("utf-8")
-        encoding = "utf-8"
-    except UnicodeDecodeError:
+    if sample[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        # Excel "Texto Unicode (*.txt)" salva UTF-16 com BOM — o codec resolve
+        # o endianness. Sem isso, o header viraria lixo com bytes nulos e o
+        # usuário veria "colunas obrigatórias ausentes" (mensagem enganosa).
+        encoding = "utf-16"
+    else:
         encoding = "cp1252"
+        # Um caractere multibyte pode ter sido CORTADO exatamente na fronteira
+        # da amostra — descarta até 3 bytes do fim antes de concluir que não é
+        # UTF-8 (senão um arquivo UTF-8 >64KiB viraria mojibake em silêncio).
+        # Só quando a amostra foi truncada (== 64KiB); em arquivo completo o
+        # corte é impossível e o trim poderia mascarar um cp1252 legítimo.
+        max_trim = 3 if len(sample) == 65536 else 0
+        for trim in range(max_trim + 1):
+            try:
+                (sample[:-trim] if trim else sample).decode("utf-8")
+                encoding = "utf-8"
+                break
+            except UnicodeDecodeError:
+                continue
 
-    first_line = sample.split(b"\n", 1)[0].decode(encoding, errors="ignore")
+    first_line = sample.decode(encoding, errors="ignore").split("\n", 1)[0]
     counts = {sep: first_line.count(sep) for sep in _CSV_SEPARATORS}
     best = max(counts.values())
     # max() já respeita a ordem de inserção do dict no empate → preferência _CSV_SEPARATORS.
@@ -376,7 +411,10 @@ def _sniff_csv(file_path: str) -> tuple[str, str]:
     return encoding, separator
 
 
-def _read_csv_frame(file_path: str, sep: str, encoding: str, overrides: dict | None):
+def _read_csv_frame(
+    file_path: str, sep: str, encoding: str, overrides: dict | None,
+    *, truncate_ragged_lines: bool = False,
+):
     """
     Lê o CSV respeitando separador e encoding detectados, forçando overrides de schema.
     UTF-8 → scan_csv (preserva column pushdown). Latin-1/cp1252 → decodifica em memória
@@ -387,13 +425,74 @@ def _read_csv_frame(file_path: str, sep: str, encoding: str, overrides: dict | N
         return pl.scan_csv(
             file_path, separator=sep, try_parse_dates=False,
             infer_schema_length=10_000, schema_overrides=overrides,
+            truncate_ragged_lines=truncate_ragged_lines,
         )
     with open(file_path, "rb") as f:
         data = f.read().decode(encoding, errors="replace").encode("utf-8")
     return pl.read_csv(
         io.BytesIO(data), separator=sep,
         infer_schema_length=10_000, schema_overrides=overrides,
+        truncate_ragged_lines=truncate_ragged_lines,
     )
+
+
+def _collect_csv(file_path: str, sep: str, encoding: str, *, truncate_ragged_lines: bool) -> pl.DataFrame:
+    """Header → rename map → override de receita → leitura final. Materializa o DataFrame."""
+    # 1ª leitura (sem dados, só header) p/ montar o rename map e achar a receita.
+    header_frame = _read_csv_frame(
+        file_path, sep, encoding, None, truncate_ragged_lines=truncate_ragged_lines
+    )
+    raw_cols = (
+        header_frame.collect_schema().names()
+        if isinstance(header_frame, pl.LazyFrame) else header_frame.columns
+    )
+
+    rename_map = _build_rename_map(raw_cols)
+    # Força a coluna de receita a ser lida como TEXTO. Sem isso, o polars infere
+    # "1.500" como Float 1.5 (milhar BR sem centavos) ANTES do nosso _clean_money_str
+    # rodar, corrompendo o valor em silêncio. Lendo como str, o cleaner decide o formato.
+    revenue_src = next((orig for orig, canon in rename_map.items() if canon == "revenue"), None)
+    overrides = {revenue_src: pl.Utf8} if revenue_src else None
+
+    # Releitura com o override (reutiliza o header_frame se não há receita a forçar).
+    frame = (
+        _read_csv_frame(file_path, sep, encoding, overrides, truncate_ragged_lines=truncate_ragged_lines)
+        if overrides else header_frame
+    )
+    # Select only columns we care about (column pushdown → reads less data from disk).
+    # As chaves do rename_map são os nomes ORIGINAIS, então preservam o pushdown.
+    cols_to_read = list(rename_map.keys())
+    if cols_to_read:
+        frame = frame.select(cols_to_read)
+    if rename_map:
+        frame = frame.rename(rename_map)
+    return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+
+
+def _load_csv(file_path: str) -> pl.DataFrame:
+    """
+    Carrega o CSV com detecção de encoding/separador. Linhas malformadas (nº de campos
+    diferente do cabeçalho — comum em export de ERP) não derrubam o arquivo: retry com
+    truncate_ragged_lines + warning; os validators guardam contra corrupção residual
+    (limiares de datas/receita nulas). Erro do polars nunca vaza cru para o usuário —
+    vira ValueError (mensagem PT-BR, sem retry no worker).
+    """
+    encoding, sep = _sniff_csv(file_path)
+    try:
+        return _collect_csv(file_path, sep, encoding, truncate_ragged_lines=False)
+    except pl.exceptions.PolarsError as exc:
+        logger.warning(
+            "etl.csv.ragged_retry",
+            extra={"encoding": encoding, "separator": sep, "error": str(exc)},
+        )
+        try:
+            return _collect_csv(file_path, sep, encoding, truncate_ragged_lines=True)
+        except pl.exceptions.PolarsError as exc2:
+            raise ValueError(
+                "Não foi possível ler o CSV: o arquivo contém linhas inconsistentes "
+                "com o cabeçalho (possivelmente corrompido ou com separador misto). "
+                "Abra o arquivo, verifique as linhas e envie novamente."
+            ) from exc2
 
 
 def _load_and_normalize(file_path: str) -> pl.DataFrame:
@@ -402,31 +501,7 @@ def _load_and_normalize(file_path: str) -> pl.DataFrame:
     normalises, validates required fields and returns an in-memory DataFrame.
     """
     if file_path.endswith(".csv"):
-        encoding, sep = _sniff_csv(file_path)
-        # 1ª leitura (sem dados, só header) p/ montar o rename map e achar a receita.
-        header_frame = _read_csv_frame(file_path, sep, encoding, None)
-        raw_cols = (
-            header_frame.collect_schema().names()
-            if isinstance(header_frame, pl.LazyFrame) else header_frame.columns
-        )
-
-        rename_map = _build_rename_map(raw_cols)
-        # Força a coluna de receita a ser lida como TEXTO. Sem isso, o polars infere
-        # "1.500" como Float 1.5 (milhar BR sem centavos) ANTES do nosso _clean_money_str
-        # rodar, corrompendo o valor em silêncio. Lendo como str, o cleaner decide o formato.
-        revenue_src = next((orig for orig, canon in rename_map.items() if canon == "revenue"), None)
-        overrides = {revenue_src: pl.Utf8} if revenue_src else None
-
-        # Releitura com o override (reutiliza o header_frame se não há receita a forçar).
-        frame = _read_csv_frame(file_path, sep, encoding, overrides) if overrides else header_frame
-        # Select only columns we care about (column pushdown → reads less data from disk).
-        # As chaves do rename_map são os nomes ORIGINAIS, então preservam o pushdown.
-        cols_to_read = list(rename_map.keys())
-        if cols_to_read:
-            frame = frame.select(cols_to_read)
-        if rename_map:
-            frame = frame.rename(rename_map)
-        df = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+        df = _load_csv(file_path)
     else:
         df = pl.read_excel(file_path)
         df = normalize_columns(df)

@@ -14,7 +14,7 @@ def test_canon_key_normaliza_espaco_e_parenteses():
     assert _canon_key("Data Venda") == "data_venda"
     assert _canon_key("Valor (R$)") == "valor"
     assert _canon_key("  Qtd  ") == "qtd"
-    assert _canon_key("Preço Total (R$)") == "preço_total"  # acento preservado; sufixo removido
+    assert _canon_key("Preço Total (R$)") == "preco_total"  # acento e sufixo removidos
 
 
 def test_header_ptbr_com_espaco_maiuscula_parenteses_mapeia():
