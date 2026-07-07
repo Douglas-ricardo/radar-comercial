@@ -598,7 +598,7 @@ export default function CarteiraPage() {
                     </CardHeader>
                     <CardContent>
                       {targets.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma meta definida. Clique em "Definir meta" para começar.</p>
+                        <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma meta definida. Clique em “Definir meta” para começar.</p>
                       ) : (
                         <div className="space-y-3">
                           {targets.map((t) => {

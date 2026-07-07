@@ -530,7 +530,7 @@ Content-Type: application/json
         <CardContent>
           {webhooks.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">
-              Nenhum webhook configurado. Clique em "Adicionar" para criar um.
+              Nenhum webhook configurado. Clique em “Adicionar” para criar um.
             </p>
           ) : (
             <div className="space-y-3">

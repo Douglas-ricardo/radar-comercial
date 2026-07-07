@@ -714,7 +714,7 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                   {schedules.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-2 text-center">Nenhum relatório agendado. Clique em "Agendar" para criar.</p>
+                    <p className="text-sm text-muted-foreground py-2 text-center">Nenhum relatório agendado. Clique em “Agendar” para criar.</p>
                   ) : (
                     <div className="space-y-2">
                       {schedules.map(s => {

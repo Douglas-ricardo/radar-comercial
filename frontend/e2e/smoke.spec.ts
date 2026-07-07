@@ -9,7 +9,8 @@ test('landing: proposta de valor + CTA visíveis', async ({ page }) => {
 test('login: formulário renderiza', async ({ page }) => {
   await page.goto('/login')
   await expect(page.getByLabel(/Email corporativo/i)).toBeVisible()
-  await expect(page.getByRole('button', { name: /Entrar/i })).toBeVisible()
+  // nome completo: a página também tem "Entrar com SSO" — /Entrar/i seria ambíguo (strict mode)
+  await expect(page.getByRole('button', { name: /Entrar na plataforma/i })).toBeVisible()
 })
 
 test('signup: campos renderizam', async ({ page }) => {
