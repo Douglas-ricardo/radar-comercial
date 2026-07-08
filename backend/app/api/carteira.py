@@ -4,6 +4,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_and_company
@@ -11,6 +12,7 @@ from app.core.permissions import visible_branches
 from app.domain.models import ComputedInsights, CustomerProfile, OpportunityAction, SalesTarget, User
 from app.infrastructure.database import get_db_session
 from app.services import metrics_service
+from app.services.live_recency import refresh_days_inactive, live_recency_days, company_dataset_max
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +101,9 @@ def list_carteira(
         if candidate and candidate.opportunities:
             insights = candidate
             break
-    raw = insights.opportunities if insights else []
+    # Recência viva (gated por frescor) — consistente com o dashboard, senão a
+    # Carteira mostraria os dias congelados enquanto o dashboard tica.
+    raw = refresh_days_inactive(insights.opportunities, company_dataset_max(db, company_id)) if insights else []
 
     actions = (
         db.query(OpportunityAction)
@@ -135,8 +139,142 @@ def list_carteira(
             },
         })
 
+    # ── Ações "fora da base atual" ────────────────────────────────────────────
+    # O cliente saiu da base (re-upload substituiu os perfis), mas a ação comercial
+    # do vendedor (won/lost/notas) segue no banco. Sem isso, o histórico da Carteira
+    # SOME da tela. Exibimos como órfã (outOfBase) para não perder o registro.
+    # São ações do próprio usuário (já filtradas por user_id) → sem vazamento.
+    base_hashes = {opp.get("customerHash", opp.get("id", "")) for opp in raw}
+    for a in actions:
+        if a.opportunity_id in base_hashes:
+            continue
+        if status and a.status != status:
+            continue
+        result.append({
+            "id": a.opportunity_id,
+            "customerHash": a.opportunity_id,
+            "customer": a.customer_name or "Cliente sem nome",
+            "product": None,
+            "type": "missing_sale",
+            "lastPurchase": None,
+            "frequency": None,
+            "expectedValue": a.expected_value or 0.0,
+            "confidence": "low",
+            "daysInactive": 0,
+            "outOfBase": True,
+            "action": {
+                "status": a.status,
+                "notes": a.notes,
+                "channel": a.channel,
+                "updatedAt": a.updated_at.isoformat() if a.updated_at else None,
+            },
+        })
+
     total = len(result)
     page = result[offset: offset + limit]
+    return {"success": True, "data": page, "pagination": {"total": total, "limit": limit, "offset": offset}}
+
+
+_CUSTOMER_SORTS = {
+    "value": (CustomerProfile.expected_value, True),
+    "revenue": (CustomerProfile.total_revenue, True),
+    "recency": (CustomerProfile.recency_days, True),
+    "recovery": (CustomerProfile.recovery_score, True),
+    "name": (CustomerProfile.customer_name, False),
+}
+
+
+@router.get("/{company_id}/customers")
+def list_all_customers(
+    company_id: str,
+    search: Optional[str] = None,
+    segment: Optional[str] = None,          # champion|loyal|at_risk|lost|new
+    status: Optional[str] = None,           # active|at_risk|churned
+    recovery: Optional[str] = None,         # alta|media|baixa
+    action_status: Optional[str] = None,    # to_contact|contacted|won|lost|none
+    has_contact: Optional[bool] = None,
+    branch: Optional[str] = None,
+    salesperson: Optional[str] = None,
+    sort: str = "value",
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    token_data=Depends(get_current_user_and_company),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Base COMPLETA de clientes (todos os perfis, não só oportunidades) para análise
+    e controle na Carteira. Filtros: busca por nome, segmento, status comercial,
+    faixa de recuperabilidade, status da ação, com/sem contato, filial, vendedor.
+    Recência viva (gated por frescor). Merge com a ação comercial do usuário.
+    """
+    if token_data.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    allowed_branches = _allowed_branches(db, token_data, branch)
+
+    q = db.query(CustomerProfile).filter(CustomerProfile.company_id == company_id)
+    if allowed_branches is not None:
+        q = q.filter(CustomerProfile.branch.in_(allowed_branches))
+    if salesperson:
+        q = q.filter(CustomerProfile.salesperson == salesperson)
+    if search:
+        q = q.filter(CustomerProfile.customer_name.ilike(f"%{search.strip()}%"))
+    if segment:
+        q = q.filter(CustomerProfile.segment == segment)
+    if status:
+        q = q.filter(CustomerProfile.status == status)
+    if recovery:
+        q = q.filter(CustomerProfile.recovery_band == recovery)
+    if has_contact is True:
+        q = q.filter(or_(CustomerProfile.phone.isnot(None), CustomerProfile.email.isnot(None)))
+    elif has_contact is False:
+        q = q.filter(CustomerProfile.phone.is_(None), CustomerProfile.email.is_(None))
+
+    col, desc = _CUSTOMER_SORTS.get(sort, _CUSTOMER_SORTS["value"])
+    q = q.order_by(col.desc() if desc else col.asc())
+
+    profiles = q.all()
+
+    # Ações do usuário → mapa por customer_hash (mesma semântica do funil).
+    actions = {
+        a.opportunity_id: a
+        for a in db.query(OpportunityAction).filter_by(
+            company_id=company_id, user_id=token_data.user_id
+        ).all()
+    }
+
+    dataset_max = company_dataset_max(db, company_id)
+    rows = []
+    for p in profiles:
+        act = actions.get(p.customer_hash)
+        act_status = act.status if act else "none"
+        if action_status and act_status != action_status:
+            continue
+        rows.append({
+            "customerHash": p.customer_hash,
+            "customer": p.customer_name,
+            "segment": p.segment,
+            "status": p.status,
+            "lastPurchase": p.last_purchase_date,
+            "daysInactive": live_recency_days(p.last_purchase_date, p.recency_days, dataset_max),
+            "expectedValue": p.expected_value or 0.0,
+            "totalRevenue": p.total_revenue or 0.0,
+            "recoveryScore": p.recovery_score or 0,
+            "recoveryBand": p.recovery_band,
+            "hasPhone": bool(p.phone),
+            "hasEmail": bool(p.email),
+            "branch": p.branch,
+            "salesperson": p.salesperson,
+            "action": {
+                "status": act_status,
+                "notes": act.notes if act else None,
+                "channel": act.channel if act else None,
+                "updatedAt": act.updated_at.isoformat() if act and act.updated_at else None,
+            },
+        })
+
+    total = len(rows)
+    page = rows[offset: offset + limit]
     return {"success": True, "data": page, "pagination": {"total": total, "limit": limit, "offset": offset}}
 
 

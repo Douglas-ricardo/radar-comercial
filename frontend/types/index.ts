@@ -106,7 +106,7 @@ export interface User {
     fileSize: number
     uploadedBy: string
     uploadedAt: string
-    status: 'pending' | 'processing' | 'completed' | 'failed'
+    status: 'pending' | 'processing' | 'completed' | 'failed' | 'needs_confirmation'
     periodStart?: string
     periodEnd?: string
     errorMessage?: string
@@ -386,6 +386,44 @@ export interface User {
     customerHash: string
     daysInactive: number
     action: OpportunityAction
+    /** Cliente saiu da base (re-upload), mas a ação comercial foi preservada. */
+    outOfBase?: boolean
+  }
+
+  /** Linha da base COMPLETA de clientes (aba "Todos os clientes" da Carteira). */
+  export interface CarteiraCustomer {
+    customerHash: string
+    customer: string
+    segment: string
+    status: 'active' | 'at_risk' | 'churned' | null
+    lastPurchase: string | null
+    daysInactive: number
+    expectedValue: number
+    totalRevenue: number
+    recoveryScore: number
+    recoveryBand: 'alta' | 'media' | 'baixa' | null
+    hasPhone: boolean
+    hasEmail: boolean
+    branch: string | null
+    salesperson: string | null
+    action: {
+      status: OpportunityStatus | 'none'
+      notes: string | null
+      channel: string | null
+      updatedAt: string | null
+    }
+  }
+
+  export interface CarteiraCustomerFilters {
+    search?: string
+    segment?: string
+    status?: 'active' | 'at_risk' | 'churned'
+    recovery?: 'alta' | 'media' | 'baixa'
+    action_status?: OpportunityStatus | 'none'
+    has_contact?: boolean
+    branch?: string
+    salesperson?: string
+    sort?: 'value' | 'revenue' | 'recency' | 'recovery' | 'name'
   }
 
   export interface GenerateMessageResponse {

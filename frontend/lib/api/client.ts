@@ -21,6 +21,8 @@ import type {
   NewApiKey,
   NotificationPreference,
   CarteiraOpportunity,
+  CarteiraCustomer,
+  CarteiraCustomerFilters,
   RankingEntry,
   ResultMetrics,
   OpportunityStatus,
@@ -229,7 +231,8 @@ export const filesApi = {
   /** Upload com progresso real via XHR. Usa cookie automaticamente. */
   async upload(
     file: File,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    force = false
   ): Promise<ApiResponse<UploadedFile>> {
     const formData = new FormData()
     formData.append('file', file)
@@ -263,7 +266,7 @@ export const filesApi = {
         resolve({ success: false, error: 'Erro de conexão' })
       )
 
-      xhr.open('POST', `${API_BASE_URL}/files/upload`)
+      xhr.open('POST', `${API_BASE_URL}/files/upload${force ? '?force=true' : ''}`)
       xhr.withCredentials = true // envia cookie httpOnly
       xhr.send(formData)
     })
@@ -525,6 +528,19 @@ export const carteiraApi = {
     if (salesperson) params.set('salesperson', salesperson)
     const q = params.size ? `?${params.toString()}` : ''
     return fetchWithAuth(`/carteira/${companyId}${q}`)
+  },
+
+  /** Base COMPLETA de clientes (aba "Todos os clientes") com filtros de análise. */
+  async listCustomers(
+    companyId: string,
+    filters: CarteiraCustomerFilters = {}
+  ): Promise<ApiResponse<CarteiraCustomer[]>> {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== '' && v !== null) params.set(k, String(v))
+    })
+    const q = params.size ? `?${params.toString()}` : ''
+    return fetchWithAuth(`/carteira/${companyId}/customers${q}`)
   },
 
   async upsertAction(

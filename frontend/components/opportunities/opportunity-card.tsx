@@ -16,6 +16,7 @@ interface OpportunityCardProps {
   recoveryBand?: 'alta' | 'media' | 'baixa'
   recoveryReasons?: string[]
   status?: OpportunityStatus
+  outOfBase?: boolean
   compact?: boolean
   onOpen?: () => void
   onGenerateMessage?: () => void
@@ -40,6 +41,7 @@ export function OpportunityCard({
   recoveryBand,
   recoveryReasons,
   status,
+  outOfBase = false,
   compact = false,
   onOpen,
   onGenerateMessage,
@@ -64,11 +66,18 @@ export function OpportunityCard({
       {/* topo: cliente + inatividade */}
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-medium leading-tight text-foreground">{customer}</h3>
-        {typeof daysInactive === 'number' && daysInactive > 0 && (
+        {outOfBase ? (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            title="Este cliente não está na base atual (foi substituído por um novo upload), mas o histórico comercial foi preservado."
+          >
+            Fora da base atual
+          </span>
+        ) : typeof daysInactive === 'number' && daysInactive > 0 ? (
           <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
             <Clock className="h-3.5 w-3.5" aria-hidden /> {daysInactive} dias inativo
           </span>
-        )}
+        ) : null}
       </div>
       {(product || frequency) && (
         <p className="mt-1 text-xs text-muted-foreground">

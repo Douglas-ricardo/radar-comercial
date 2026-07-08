@@ -19,13 +19,22 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, FieldLabel } from '@/components/ui/field'
-import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X, Download, BarChart3, Target, Plus, Trash2 } from 'lucide-react'
+import { Briefcase, Medal, DollarSign, ArrowRight, Filter, X, Download, BarChart3, Target, Plus, Trash2, Users, Search, Phone, Mail } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { api, opportunitiesApi, reportsApi } from '@/lib/api/client'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CarteiraOpportunity, GerencialData, OpportunityStatus, RankingEntry, ResultMetrics, SalesTarget } from '@/types'
+import type { CarteiraOpportunity, CarteiraCustomer, CarteiraCustomerFilters, GerencialData, OpportunityStatus, RankingEntry, ResultMetrics, SalesTarget } from '@/types'
+
+const SEGMENT_LABELS: Record<string, string> = {
+  champion: 'Campeão', loyal: 'Fiel', at_risk: 'Em risco', lost: 'Perdido', new: 'Novo',
+}
+const CUSTOMER_STATUS: Record<string, { label: string; cls: string }> = {
+  active: { label: 'Ativo', cls: 'bg-success/10 text-success' },
+  at_risk: { label: 'Em risco', cls: 'bg-warning/10 text-warning' },
+  churned: { label: 'Perdido', cls: 'bg-destructive/10 text-destructive' },
+}
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   to_contact: 'A contatar',
@@ -168,6 +177,10 @@ export default function CarteiraPage() {
   const [metrics, setMetrics] = useState<ResultMetrics | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [selectedOpp, setSelectedOpp] = useState<CarteiraOpportunity | null>(null)
+  const [tab, setTab] = useState('oportunidades')
+  const [customers, setCustomers] = useState<CarteiraCustomer[]>([])
+  const [customersLoading, setCustomersLoading] = useState(false)
+  const [custFilters, setCustFilters] = useState<CarteiraCustomerFilters>({ sort: 'value' })
   const [gerencial, setGerencial] = useState<GerencialData | null>(null)
   const [targets, setTargets] = useState<SalesTarget[]>([])
   const [targetDialog, setTargetDialog] = useState(false)
@@ -195,6 +208,41 @@ export default function CarteiraPage() {
       setMsgModal({ open: true, text: '', loading: false, error: 'Não foi possível gerar agora. Verifique a integração de IA em Configurações.' })
     }
   }
+
+  const loadCustomers = useCallback(async () => {
+    if (!company?.id) return
+    setCustomersLoading(true)
+    try {
+      const res = await api.carteira.listCustomers(company.id, {
+        ...custFilters,
+        branch: appliedBranch || undefined,
+        salesperson: appliedSalesperson || undefined,
+      })
+      if (res.success && res.data) setCustomers(res.data)
+    } finally {
+      setCustomersLoading(false)
+    }
+  }, [company?.id, custFilters, appliedBranch, appliedSalesperson])
+
+  // Carrega a base completa só quando a aba "Todos os clientes" está ativa.
+  // Debounce cobre a digitação da busca sem disparar uma request por tecla.
+  useEffect(() => {
+    if (tab !== 'todos') return
+    const t = setTimeout(loadCustomers, 350)
+    return () => clearTimeout(t)
+  }, [tab, loadCustomers])
+
+  // Mapeia um cliente da base p/ o formato do ActionDialog (reaproveita o controle).
+  const customerToOpp = (c: CarteiraCustomer): CarteiraOpportunity => ({
+    id: c.customerHash, customerHash: c.customerHash, customer: c.customer,
+    product: null, type: 'missing_sale', lastPurchase: c.lastPurchase, frequency: null,
+    expectedValue: c.expectedValue, confidence: 'low', daysInactive: c.daysInactive,
+    recoveryScore: c.recoveryScore, recoveryBand: c.recoveryBand ?? undefined,
+    action: {
+      ...c.action,
+      status: c.action.status === 'none' ? 'to_contact' : c.action.status,
+    },
+  })
 
   const load = useCallback(async (branch?: string, salesperson?: string) => {
     if (!company?.id) return
@@ -327,12 +375,16 @@ export default function CarteiraPage() {
           </div>
         )}
 
-        <Tabs defaultValue="oportunidades">
+        <Tabs value={tab} onValueChange={setTab}>
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <TabsList>
               <TabsTrigger value="oportunidades">
                 <Briefcase className="h-4 w-4 mr-2" />
                 Oportunidades
+              </TabsTrigger>
+              <TabsTrigger value="todos">
+                <Users className="h-4 w-4 mr-2" />
+                Todos os clientes
               </TabsTrigger>
               <TabsTrigger value="ranking">
                 <Medal className="h-4 w-4 mr-2" />
@@ -449,8 +501,9 @@ export default function CarteiraPage() {
                               recoveryScore={opp.recoveryScore}
                               recoveryBand={opp.recoveryBand}
                               recoveryReasons={opp.recoveryReasons}
+                              outOfBase={opp.outOfBase}
                               onOpen={() => setSelectedOpp(opp)}
-                              onGenerateMessage={canUseAI ? () => handleGenerateMessage(opp) : undefined}
+                              onGenerateMessage={canUseAI && !opp.outOfBase ? () => handleGenerateMessage(opp) : undefined}
                             />
                           ))
                         )}
@@ -458,6 +511,148 @@ export default function CarteiraPage() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Tab Todos os clientes — base completa filtrável */}
+          <TabsContent value="todos" className="space-y-4 mt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-8"
+                  placeholder="Buscar cliente pelo nome..."
+                  value={custFilters.search ?? ''}
+                  onChange={(e) => setCustFilters((f) => ({ ...f, search: e.target.value || undefined }))}
+                />
+              </div>
+              <Select value={custFilters.status ?? 'all'} onValueChange={(v) => setCustFilters((f) => ({ ...f, status: v === 'all' ? undefined : (v as CarteiraCustomerFilters['status']) }))}>
+                <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todo status</SelectItem>
+                  <SelectItem value="active">Ativo</SelectItem>
+                  <SelectItem value="at_risk">Em risco</SelectItem>
+                  <SelectItem value="churned">Perdido</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={custFilters.action_status ?? 'all'} onValueChange={(v) => setCustFilters((f) => ({ ...f, action_status: v === 'all' ? undefined : (v as CarteiraCustomerFilters['action_status']) }))}>
+                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Ação" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toda ação</SelectItem>
+                  <SelectItem value="none">Sem ação</SelectItem>
+                  <SelectItem value="to_contact">A contatar</SelectItem>
+                  <SelectItem value="contacted">Contatado</SelectItem>
+                  <SelectItem value="won">Ganho</SelectItem>
+                  <SelectItem value="lost">Perdido</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={custFilters.recovery ?? 'all'} onValueChange={(v) => setCustFilters((f) => ({ ...f, recovery: v === 'all' ? undefined : (v as CarteiraCustomerFilters['recovery']) }))}>
+                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Recuperabilidade" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toda recuperação</SelectItem>
+                  <SelectItem value="alta">Alta</SelectItem>
+                  <SelectItem value="media">Média</SelectItem>
+                  <SelectItem value="baixa">Baixa</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={custFilters.has_contact === undefined ? 'all' : String(custFilters.has_contact)} onValueChange={(v) => setCustFilters((f) => ({ ...f, has_contact: v === 'all' ? undefined : v === 'true' }))}>
+                <SelectTrigger className="w-[130px]"><SelectValue placeholder="Contato" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Com/sem contato</SelectItem>
+                  <SelectItem value="true">Com contato</SelectItem>
+                  <SelectItem value="false">Sem contato</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={custFilters.sort ?? 'value'} onValueChange={(v) => setCustFilters((f) => ({ ...f, sort: v as CarteiraCustomerFilters['sort'] }))}>
+                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Ordenar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="value">Maior valor</SelectItem>
+                  <SelectItem value="revenue">Maior receita</SelectItem>
+                  <SelectItem value="recency">Mais tempo sem comprar</SelectItem>
+                  <SelectItem value="recovery">Mais recuperável</SelectItem>
+                  <SelectItem value="name">Nome (A-Z)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {customersLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+              </div>
+            ) : customers.length === 0 ? (
+              <Card className="rounded-2xl border border-border bg-card shadow-sm">
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  Nenhum cliente encontrado com esses filtros. Ajuste a busca ou faça upload de vendas.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="rounded-2xl border border-border bg-card shadow-sm">
+                <p className="border-b border-border px-4 py-2.5 text-xs text-muted-foreground">
+                  {customers.length} {customers.length === 1 ? 'cliente' : 'clientes'}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="px-4 py-2 font-medium">Cliente</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Sem comprar</th>
+                        <th className="px-3 py-2 text-right font-medium">Valor recuperável</th>
+                        <th className="px-3 py-2 font-medium">Recuperação</th>
+                        <th className="px-3 py-2 font-medium">Contato</th>
+                        <th className="px-3 py-2 font-medium">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customers.map((c) => {
+                        const cs = c.status ? CUSTOMER_STATUS[c.status] : null
+                        const act = c.action.status
+                        return (
+                          <tr
+                            key={c.customerHash}
+                            onClick={() => setSelectedOpp(customerToOpp(c))}
+                            className="cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-secondary/40"
+                          >
+                            <td className="px-4 py-2.5">
+                              <span className="font-medium text-foreground">{c.customer}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">{SEGMENT_LABELS[c.segment] ?? c.segment}</span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {cs && <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium', cs.cls)}>{cs.label}</span>}
+                            </td>
+                            <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                              {c.daysInactive > 0 ? `${c.daysInactive} dias` : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono tabular-nums text-primary">{formatCurrency(c.expectedValue)}</td>
+                            <td className="px-3 py-2.5">
+                              {c.recoveryBand && (
+                                <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
+                                  c.recoveryBand === 'alta' ? 'bg-success/10 text-success'
+                                  : c.recoveryBand === 'media' ? 'bg-warning/10 text-warning'
+                                  : 'bg-muted text-muted-foreground')}>{c.recoveryScore}</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className="flex items-center gap-1.5 text-muted-foreground">
+                                {c.hasPhone && <Phone className="h-3.5 w-3.5 text-success" aria-label="Tem telefone" />}
+                                {c.hasEmail && <Mail className="h-3.5 w-3.5 text-primary" aria-label="Tem email" />}
+                                {!c.hasPhone && !c.hasEmail && <span className="text-xs">—</span>}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {act !== 'none' ? (
+                                <span className="text-xs font-medium">{STATUS_LABELS[act]}</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </TabsContent>
@@ -737,7 +932,7 @@ export default function CarteiraPage() {
       <ActionDialog
         opp={selectedOpp}
         onClose={() => setSelectedOpp(null)}
-        onSaved={load}
+        onSaved={() => { load(); if (tab === 'todos') loadCustomers() }}
         companyId={company?.id ?? ''}
       />
 
