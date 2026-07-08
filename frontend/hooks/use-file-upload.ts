@@ -13,7 +13,7 @@ import { useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 
-export type UploadStatus = 'idle' | 'uploading' | 'processing' | 'completed' | 'failed'
+export type UploadStatus = 'idle' | 'uploading' | 'processing' | 'completed' | 'failed' | 'needs_confirmation'
 
 interface UseFileUploadReturn {
   file: File | null
@@ -21,7 +21,7 @@ interface UseFileUploadReturn {
   progress: number
   errorMessage: string | null
   selectFile: (file: File) => void
-  startUpload: () => Promise<void>
+  startUpload: (force?: boolean) => Promise<void>
   reset: () => void
 }
 
@@ -124,6 +124,15 @@ export function useFileUpload(): UseFileUploadReturn {
           return
         }
 
+        // Guard de mudança de base: o arquivo parece substituir a base atual.
+        // Nada foi alterado — o usuário decide confirmar (reenviar com force).
+        if (fileStatus === 'needs_confirmation') {
+          setStatus('needs_confirmation')
+          setErrorMessage(response.data.errorMessage ?? 'Este upload substituiria sua base atual.')
+          stopPolling()
+          return
+        }
+
         // Ainda processando — atualiza progresso estimado e reagenda
         setProgress(estimatedProgress(attemptRef.current))
         pollTimeoutRef.current = setTimeout(poll, POLL_INTERVAL_MS)
@@ -137,7 +146,7 @@ export function useFileUpload(): UseFileUploadReturn {
     poll()
   }, [stopPolling])
 
-  const startUpload = useCallback(async () => {
+  const startUpload = useCallback(async (force = false) => {
     if (!file) return
 
     stopPolling()
@@ -146,7 +155,7 @@ export function useFileUpload(): UseFileUploadReturn {
     setErrorMessage(null)
 
     try {
-      const response = await api.files.upload(file, (p) => setProgress(p))
+      const response = await api.files.upload(file, (p) => setProgress(p), force)
 
       if (!response.success || !response.data) {
         const msg = response.error ?? 'Não foi possível enviar o arquivo.'

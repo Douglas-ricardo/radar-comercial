@@ -141,6 +141,11 @@ export default function HistoryPage() {
         label: 'Erro',
         className: 'bg-destructive/10 text-destructive',
       },
+      needs_confirmation: {
+        icon: AlertCircle,
+        label: 'Confirmação',
+        className: 'bg-warning/10 text-warning',
+      },
     } as const
 
     const { icon: Icon, label, className } = config[status] ?? config.pending

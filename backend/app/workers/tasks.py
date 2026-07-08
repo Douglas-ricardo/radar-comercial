@@ -23,12 +23,30 @@ _ETL_LOCK_WAIT = 5
 # Padrão FALSE = não reter transação bruta (decisão LGPD). Ligar conscientemente.
 _RETAIN_SOURCE = os.getenv("RETAIN_SOURCE_FILES", "false").lower() == "true"
 
-# Guarda de encolhimento (ingest incremental): se a carga via API resultaria em
-# menos da METADE dos clientes da base atual (e a base é relevante), aborta em
-# vez de substituir — protege quem fez upload manual e conectou o ERP depois
-# sem backfill. Upload manual NÃO passa por esta guarda (substituir é intencional).
+# Guarda de mudança de base: aborta a substituição se a carga (a) ENCOLHERIA a base
+# a menos da METADE, ou (b) tem BAIXA SOBREPOSIÇÃO com a base atual (parece um arquivo
+# diferente — foi o que apagou a base real por engano). Só vale quando a base é
+# relevante (>= MIN). Ingest via API: aborta com instrução de backfill. Upload manual:
+# vira "needs_confirmation" (o vendedor confirma reenviando com force).
 _SHRINK_GUARD_MIN_BASE = int(os.getenv("INGEST_SHRINK_GUARD_MIN_BASE", "10"))
 _SHRINK_GUARD_RATIO = float(os.getenv("INGEST_SHRINK_GUARD_RATIO", "0.5"))
+_OVERLAP_GUARD_RATIO = float(os.getenv("INGEST_OVERLAP_GUARD_RATIO", "0.5"))
+
+
+def _base_change_guard(db, company_id: str, new_profiles: list) -> tuple[bool, int, int, int]:
+    """(tripped, n_new, n_existing, overlap_pct). Não dispara se a base atual é pequena."""
+    existing = {
+        r[0] for r in db.query(CustomerProfile.customer_hash)
+        .filter_by(company_id=company_id).all()
+    }
+    n_existing = len(existing)
+    n_new = len(new_profiles)
+    if n_existing < _SHRINK_GUARD_MIN_BASE:
+        return False, n_new, n_existing, 100
+    new_hashes = {p["customer_hash"] for p in new_profiles}
+    overlap = len(existing & new_hashes) / n_existing
+    tripped = (n_new < n_existing * _SHRINK_GUARD_RATIO) or (overlap < _OVERLAP_GUARD_RATIO)
+    return tripped, n_new, n_existing, round(overlap * 100)
 
 
 def customer_profile_row(company_id: str, p: dict, *, preserved=(None, None, False), opted_out=frozenset()) -> CustomerProfile:
@@ -76,6 +94,7 @@ def customer_profile_row(company_id: str, p: dict, *, preserved=(None, None, Fal
 def process_sales_file(
     self, file_id: str, company_id: str, file_ref: str,
     preserve_source: bool = False, guard_base_shrink: bool = False,
+    confirmable_guard: bool = False,
 ):
     """
     file_ref pode ser um path local (fallback) ou "r2://<key>" (object storage).
@@ -105,20 +124,34 @@ def process_sales_file(
         result = process_sales_pipeline(local_file_path, company_id, cycle_days=cycle_days)
 
         if guard_base_shrink:
-            existing_profiles = (
-                db.query(CustomerProfile).filter_by(company_id=company_id).count()
+            tripped, n_new, n_existing, overlap_pct = _base_change_guard(
+                db, company_id, result["customer_profiles"]
             )
-            new_profiles_count = len(result["customer_profiles"])
-            if (
-                existing_profiles >= _SHRINK_GUARD_MIN_BASE
-                and new_profiles_count < existing_profiles * _SHRINK_GUARD_RATIO
-            ):
-                # ValueError → sem retry; mensagem vai para o card do arquivo.
+            if tripped and confirmable_guard:
+                # Upload manual: não é erro — pede confirmação explícita. Base intacta
+                # (o replace só ocorre depois). Fonte é apagada; confirmar = reenviar.
+                db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+                if db_file:
+                    db_file.status = "needs_confirmation"
+                    db_file.error_message = (
+                        f"Este arquivo geraria {n_new} clientes e apenas {overlap_pct}% batem "
+                        f"com a sua base atual de {n_existing}. Parece um arquivo diferente da "
+                        "sua base — para proteger seus dados, NADA foi alterado. Se a "
+                        "substituição for intencional, reenvie confirmando a substituição."
+                    )
+                db.commit()
+                logger.warning("worker.task.needs_confirmation", extra={
+                    "file_id": file_id, "company_id": company_id,
+                    "n_new": n_new, "n_existing": n_existing, "overlap_pct": overlap_pct,
+                })
+                return {"status": "needs_confirmation", "file_id": file_id}
+            if tripped:
+                # Ingest via API: aborta com instrução de backfill (ValueError → sem retry).
                 raise ValueError(
-                    f"A carga via API resultaria em {new_profiles_count} clientes, mas a base "
-                    f"atual tem {existing_profiles}. Para proteger seus dados, NADA foi alterado. "
-                    "Envie primeiro uma carga inicial completa do histórico (backfill) via API — "
-                    "os lotes diários passam a somar a partir dela."
+                    f"A carga via API resultaria em {n_new} clientes, mas a base atual tem "
+                    f"{n_existing} (sobreposição {overlap_pct}%). Para proteger seus dados, NADA "
+                    "foi alterado. Envie primeiro uma carga inicial completa do histórico "
+                    "(backfill) — os lotes diários passam a somar a partir dela."
                 )
 
         # ── ComputedInsights: upsert per (company_id, date_range) ─────────────

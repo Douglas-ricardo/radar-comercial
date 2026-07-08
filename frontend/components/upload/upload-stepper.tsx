@@ -13,6 +13,7 @@ const STEPS = [
 const STATUS_TO_STEP: Record<UploadStatus, number> = {
   idle: 0,
   failed: 1,
+  needs_confirmation: 1,
   uploading: 1,
   processing: 2,
   completed: 3,

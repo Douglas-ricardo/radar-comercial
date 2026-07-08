@@ -69,6 +69,7 @@ def _refund_upload(db: Session, file_id: str, company_id: str) -> None:
 @router.post("/upload")
 async def upload_file(
     file: UploadFile,
+    force: bool = Query(default=False, description="Substituir a base mesmo se o guard de mudança disparar (confirmação do usuário)."),
     token_data=Depends(require_upload_permission),
     db: Session = Depends(get_db_session),
 ):
@@ -201,7 +202,13 @@ async def upload_file(
         db.query(UploadedFile).filter(UploadedFile.id == file_id).update({"source_ref": file_ref})
         db.commit()
 
-        process_sales_file.delay(file_id, company_id, file_ref)
+        # Guard de mudança de base no upload manual: se NÃO for forçado, o worker
+        # exige confirmação (status "needs_confirmation") quando o arquivo parece
+        # substituir a base por uma diferente. force=true (reenvio confirmado) pula.
+        process_sales_file.delay(
+            file_id, company_id, file_ref,
+            guard_base_shrink=not force, confirmable_guard=not force,
+        )
     except Exception as exc:
         storage.cleanup_local(local_file_path)
         _refund_upload(db, file_id, company_id)

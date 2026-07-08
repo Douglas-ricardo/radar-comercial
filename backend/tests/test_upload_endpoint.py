@@ -36,10 +36,11 @@ def test_upload_csv_valido_retorna_200_e_file_id(client, monkeypatch):
     # Não dependemos do broker real: o enfileiramento é mockado.
     enqueued = {}
 
-    def _fake_delay(file_id, company_id, file_ref):
+    def _fake_delay(file_id, company_id, file_ref, **kwargs):
         enqueued["file_id"] = file_id
         enqueued["company_id"] = company_id
         enqueued["file_ref"] = file_ref
+        enqueued["kwargs"] = kwargs
 
     monkeypatch.setattr("app.api.files.process_sales_file.delay", _fake_delay)
 

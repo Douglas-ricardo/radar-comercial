@@ -2,7 +2,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { Download, Lightbulb, TableProperties } from 'lucide-react'
+import { Download, Lightbulb, TableProperties, AlertTriangle } from 'lucide-react'
 
 import { DashboardHeader } from '@/components/dashboard/header'
 import {
@@ -65,6 +65,7 @@ export default function UploadPage() {
   const isFailed = status === 'failed'
   const isInProgress = status === 'uploading' || status === 'processing'
   const isCompleted = status === 'completed'
+  const isNeedsConfirmation = status === 'needs_confirmation'
   const hasFile = file !== null
 
   function renderMainArea() {
@@ -87,13 +88,34 @@ export default function UploadPage() {
       )
     }
 
+    if (isNeedsConfirmation) {
+      return (
+        <Card className="border-warning/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-warning">
+              <AlertTriangle className="h-5 w-5" /> Confirmação necessária
+            </CardTitle>
+            <CardDescription className="text-foreground">{errorMessage}</CardDescription>
+          </CardHeader>
+          <CardFooter className="flex flex-wrap gap-2">
+            <Button variant="destructive" onClick={() => startUpload(true)}>
+              Substituir a base mesmo assim
+            </Button>
+            <Button variant="outline" onClick={reset}>
+              Cancelar e escolher outro arquivo
+            </Button>
+          </CardFooter>
+        </Card>
+      )
+    }
+
     if (hasFile && (isIdle || isFailed)) {
       return (
         <ConfirmState
           file={file}
           status={status}
           errorMessage={errorMessage}
-          onUpload={startUpload}
+          onUpload={() => startUpload()}
           onReset={reset}
         />
       )
