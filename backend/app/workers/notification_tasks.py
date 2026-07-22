@@ -69,14 +69,14 @@ def send_daily_notifications(self):
                         f" — {company.name}"
                     )
                     html = NotificationService.format_opportunity_email(
-                        user.name, opportunities, company.name
+                        user.name, opportunities, company.name, company.currency
                     )
                     if NotificationService.send_email(user.email, subject, html):
                         sent += 1
 
                 if pref.whatsapp_enabled and pref.whatsapp_phone:
                     msg = NotificationService.format_opportunity_whatsapp(
-                        user.name, opportunities
+                        user.name, opportunities, company.currency
                     )
                     NotificationService.send_whatsapp(pref.whatsapp_phone, msg)
 

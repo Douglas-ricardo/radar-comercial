@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["Files"])
 
-# Limite de upload — configurável via MAX_UPLOAD_MB (default 500).
+# Limite de upload — configurável via MAX_UPLOAD_MB (default 50, alinhado ao CLAUDE.md).
 # Aumentar sem redimensionar o worker pode causar OOM; veja ETL lazy em etl.py.
-_MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+_MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_FILE_SIZE = _MAX_UPLOAD_MB * 1024 * 1024
 
 

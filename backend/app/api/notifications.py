@@ -126,12 +126,12 @@ def test_send(
 
     results: dict = {}
 
-    html = NotificationService.format_opportunity_email(user.name, sample, company.name)
+    html = NotificationService.format_opportunity_email(user.name, sample, company.name, company.currency)
     subject = "[Teste] Radar Comercial — Notificação de teste"
     results["email"] = NotificationService.send_email(user.email, subject, html)
 
     if pref and pref.whatsapp_enabled and pref.whatsapp_phone:
-        msg = NotificationService.format_opportunity_whatsapp(user.name, sample)
+        msg = NotificationService.format_opportunity_whatsapp(user.name, sample, company.currency)
         results["whatsapp"] = NotificationService.send_whatsapp(pref.whatsapp_phone, msg)
 
     logger.info("notifications.test_send", extra={"user_id": token_data.user_id})

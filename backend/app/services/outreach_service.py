@@ -38,9 +38,9 @@ _SEGMENT_LABELS = {
 _MSG_CACHE_TTL = 60 * 60 * 72  # 72h — alinhado ao recompute do CustomerProfile
 
 
-def _cache_key(profile: CustomerProfile) -> str:
+def _cache_key(profile: CustomerProfile, channel: str = "whatsapp") -> str:
     computed = profile.computed_at.date().isoformat() if profile.computed_at else "na"
-    return f"outreach_msg:{profile.company_id}:{profile.customer_hash}:{computed}"
+    return f"outreach_msg:{channel}:{profile.company_id}:{profile.customer_hash}:{computed}"
 
 
 def _live_days_for(db: Session, profile: CustomerProfile) -> int:
@@ -49,14 +49,37 @@ def _live_days_for(db: Session, profile: CustomerProfile) -> int:
     return live_recency_days(profile.last_purchase_date, profile.recency_days, dataset_max)
 
 
+def _fallback_message(
+    profile: CustomerProfile, channel: str, last_products: str, assinatura: str
+) -> str:
+    """Mensagem estática (sem IA), personalizada com os dados reais. Por canal:
+    WhatsApp é curto e pessoal (assina inline); email é formal e SEM emoji
+    (a assinatura vem do rodapé do template, então o corpo não assina)."""
+    if channel == "email":
+        prod = f" Temos novidades na linha de {last_products}." if last_products else ""
+        return (
+            f"Prezado(a) {profile.customer_name},\n\n"
+            f"Notamos que faz um tempo desde a sua última compra conosco.{prod} "
+            f"Gostaríamos de retomar o contato e apresentar as melhores condições para o seu próximo pedido.\n\n"
+            f"Ficamos à disposição para ajudá-lo(a). Podemos preparar uma proposta personalizada?"
+        )
+    prod = f" Temos novidades em {last_products}." if last_products else ""
+    return (
+        f"Olá {profile.customer_name}! Notamos que faz um tempo desde sua última compra."
+        f"{prod} Posso te ajudar com um pedido especial? — {assinatura}"
+    )
+
+
 def generate_message(
-    profile: CustomerProfile, sender_name: str | None, *, days_override: int | None = None
+    profile: CustomerProfile, sender_name: str | None, *,
+    days_override: int | None = None, channel: str = "whatsapp",
 ) -> str:
     """Gera mensagem de reativação em pt-BR via Claude. Fallback estático se sem IA.
-    Cache Redis 72h por (company, customer, data de cômputo) — evita custo repetido.
-    `days_override`: dias sem comprar já refrescados (recência viva); None → valor gravado."""
+    Cache Redis 72h por (canal, company, customer, data de cômputo) — evita custo repetido.
+    `days_override`: dias sem comprar já refrescados (recência viva); None → valor gravado.
+    `channel`: 'whatsapp' (curto, pessoal, até 2 emojis) ou 'email' (formal, SEM emoji)."""
     from app.infrastructure.redis_client import redis_client
-    cache_key = _cache_key(profile)
+    cache_key = _cache_key(profile, channel)
     try:
         cached = redis_client.get(cache_key)
         if cached:
@@ -74,14 +97,32 @@ def generate_message(
     assinatura = sender_name or "Equipe de vendas"
 
     if not api_key:
-        # Fallback sem IA — ainda personalizado com os dados reais
-        prod = f" Temos novidades em {last_products}." if last_products else ""
-        return (
-            f"Olá {profile.customer_name}! Notamos que faz um tempo desde sua última compra."
-            f"{prod} Posso te ajudar com um pedido especial? — {assinatura}"
-        )
+        return _fallback_message(profile, channel, last_products, assinatura)
 
-    prompt = f"""Você é um assistente comercial brasileiro. Gere UMA mensagem curta para
+    dados = (
+        f"DADOS:\n"
+        f"- Nome: {profile.customer_name}\n"
+        f"- Perfil: {_SEGMENT_LABELS.get(segment, segment)}\n"
+        f"- Dias sem comprar: {days}\n"
+        f"- Produtos de interesse: {last_products or 'variados'}"
+    )
+
+    if channel == "email":
+        prompt = f"""Você é um assistente comercial brasileiro escrevendo um E-MAIL formal
+de reativação para um cliente. Regras:
+- Português brasileiro, tom profissional e cordial (formal, mas não frio); trate por "você"
+- SEM emojis e SEM gírias
+- Comece a saudação com "Prezado(a) {profile.customer_name},"
+- Mencione com naturalidade o tempo sem comprar e os produtos de interesse
+- 2 a 3 parágrafos curtos
+- Termine com uma chamada para ação clara (retornar o contato, responder, agendar)
+- NÃO se despeça nem assine com nome — a assinatura é inserida automaticamente no rodapé
+
+{dados}
+
+Gere apenas o corpo do e-mail, sem linha de assunto e sem assinatura."""
+    else:
+        prompt = f"""Você é um assistente comercial brasileiro. Gere UMA mensagem curta para
 reativar este cliente, pronta para enviar no WhatsApp. Regras:
 - Português brasileiro, tom pessoal e consultivo (não robótico, sem jargão corporativo)
 - Mencione naturalmente o tempo sem comprar e os produtos de interesse
@@ -89,11 +130,7 @@ reativar este cliente, pronta para enviar no WhatsApp. Regras:
 - Termine com uma pergunta ou chamada para ação
 - Assine como "{assinatura}"
 
-DADOS:
-- Nome: {profile.customer_name}
-- Perfil: {_SEGMENT_LABELS.get(segment, segment)}
-- Dias sem comprar: {days}
-- Produtos de interesse: {last_products or 'variados'}
+{dados}
 
 Gere apenas o texto da mensagem, sem títulos."""
 
@@ -111,12 +148,8 @@ Gere apenas o texto da mensagem, sem títulos."""
             pass
         return message
     except Exception as exc:
-        logger.warning("outreach.generate.fallback", extra={"error": str(exc)})
-        prod = f" Temos novidades em {last_products}." if last_products else ""
-        return (
-            f"Olá {profile.customer_name}! Faz um tempo desde sua última compra."
-            f"{prod} Posso te ajudar? — {assinatura}"
-        )
+        logger.warning("outreach.generate.fallback", extra={"error": str(exc), "channel": channel})
+        return _fallback_message(profile, channel, last_products, assinatura)
 
 
 # Palavras que sinalizam descadastro numa resposta do cliente (pt-BR).
@@ -184,29 +217,32 @@ def record_opt_out(db: Session, company_id: str, customer_hash: str, source: str
 def _format_customer_email(
     customer_name: str, body: str, sender_name: str, company_name: str, unsubscribe_url: str | None = None
 ) -> str:
-    """E-mail formal ao cliente final, assinado pelo vendedor/empresa.
+    """E-mail pessoal ao cliente final, assinado pelo vendedor/empresa.
+
+    O `body` (gerado por IA) já traz saudação e assinatura próprias — por isso NÃO
+    repetimos "Prezado(a)" aqui, evitando saudação duplicada. Layout enxuto e pessoal
+    ajuda na entregabilidade (menos cara de email marketing em massa).
     Inclui link de descadastro (exigência de email marketing / LGPD)."""
     paragraphs = "".join(
-        f"<p style='margin:0 0 12px'>{line}</p>" for line in body.split("\n") if line.strip()
+        f"<p style='margin:0 0 14px;line-height:1.6'>{line}</p>"
+        for line in body.split("\n") if line.strip()
     )
     unsub = (
-        f'<p style="color:#999;font-size:11px;margin-top:8px">'
-        f'Não deseja mais receber estas mensagens? '
-        f'<a href="{unsubscribe_url}" style="color:#999">Descadastrar</a>.</p>'
+        f' · <a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline">descadastrar</a>'
         if unsubscribe_url else ""
     )
     return f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1a1a2e">
-      <p style="margin:0 0 12px">Prezado(a) {customer_name},</p>
-      {paragraphs}
-      <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eee;color:#555;font-size:14px">
-        <p style="margin:0"><strong>{sender_name}</strong></p>
-        <p style="margin:4px 0 0">{company_name}</p>
+    <div style="background:#f6f7f9;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #eef0f2;padding:32px;color:#1a1a2e;font-size:15px">
+        {paragraphs}
+        <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eef0f2;color:#6b7280;font-size:14px">
+          <p style="margin:0;font-weight:600;color:#1a1a2e">{sender_name}</p>
+          <p style="margin:2px 0 0">{company_name}</p>
+        </div>
       </div>
-      <p style="color:#999;font-size:11px;margin-top:24px">
-        Você recebeu este e-mail por ser cliente de {company_name}.
+      <p style="max-width:560px;margin:14px auto 0;color:#9ca3af;font-size:11px;text-align:center;line-height:1.5">
+        Você recebeu este e-mail por ser cliente de {company_name}.{unsub}
       </p>
-      {unsub}
     </div>
     """
 
@@ -243,11 +279,16 @@ def _mark_contacted_in_carteira(db: Session, company_id: str, user_id: str, prof
         ))
 
 
-def _do_whatsapp(db: Session, config: OutreachConfig, profile: CustomerProfile, message: str) -> bool | None:
-    """Envia 1 mensagem WhatsApp e loga. None se canal indisponível p/ este cliente."""
+def _do_whatsapp(db: Session, config: OutreachConfig, profile: CustomerProfile, message: str | None = None) -> bool | None:
+    """Envia 1 mensagem WhatsApp e loga. None se canal indisponível p/ este cliente.
+    Gera a mensagem do canal (curta/pessoal) sob demanda se `message` não vier."""
     if not (config.whatsapp_enabled and profile.phone and config.whatsapp_status == "connected"):
         return None
     company_id = config.company_id
+    if message is None:
+        message = generate_message(
+            profile, config.sender_name, days_override=_live_days_for(db, profile), channel="whatsapp"
+        )
     try:
         evolution_client.send_text(config.evolution_instance or company_id, profile.phone, message)
         db.add(OutreachLog(company_id=company_id, customer_hash=profile.customer_hash,
@@ -261,11 +302,16 @@ def _do_whatsapp(db: Session, config: OutreachConfig, profile: CustomerProfile, 
         return False
 
 
-def _do_email(db: Session, config: OutreachConfig, profile: CustomerProfile, message: str, company_name: str) -> bool | None:
-    """Envia 1 email e loga. None se canal indisponível p/ este cliente."""
+def _do_email(db: Session, config: OutreachConfig, profile: CustomerProfile, company_name: str, message: str | None = None) -> bool | None:
+    """Envia 1 email e loga. None se canal indisponível p/ este cliente.
+    Gera a mensagem do canal (formal, sem emoji) sob demanda se `message` não vier."""
     if not (config.email_enabled and profile.email):
         return None
     company_id = config.company_id
+    if message is None:
+        message = generate_message(
+            profile, config.sender_name, days_override=_live_days_for(db, profile), channel="email"
+        )
     try:
         from app.core.unsubscribe import make_unsubscribe_token
         base = os.getenv("APP_BASE_URL", "http://localhost:3000").rstrip("/")
@@ -310,13 +356,10 @@ def dispatch_to_customer(
     if profile.contact_opt_out or is_opted_out(db, company_id, profile.customer_hash):
         return result
 
-    if message is None:
-        message = generate_message(
-            profile, config.sender_name, days_override=_live_days_for(db, profile)
-        )
-
+    # message=None → cada canal gera a própria variante (WhatsApp pessoal, email formal).
+    # message explícito (override do vendedor no "enviar agora") vai igual pros dois canais.
     result["whatsapp"] = _do_whatsapp(db, config, profile, message)
-    result["email"] = _do_email(db, config, profile, message, company_name)
+    result["email"] = _do_email(db, config, profile, company_name, message)
 
     # Sincroniza Carteira + abre atribuição (loop de receita) se algum canal teve sucesso
     if result.get("whatsapp") or result.get("email"):
@@ -531,14 +574,12 @@ def process_due_enrollments(db: Session, company_id: str, company_name: str, lim
         steps = DEFAULT_CADENCE
         step = steps[enr.step_index] if enr.step_index < len(steps) else None
         if step is not None:
-            message = generate_message(
-                profile, config.sender_name, days_override=_live_days_for(db, profile)
-            )
+            # Cada canal gera a própria variante (WhatsApp pessoal, email formal).
             ok = None
             if step["channel"] == "whatsapp":
-                ok = _do_whatsapp(db, config, profile, message)
+                ok = _do_whatsapp(db, config, profile)
             elif step["channel"] == "email":
-                ok = _do_email(db, config, profile, message, company_name)
+                ok = _do_email(db, config, profile, company_name)
             if ok:  # primeiro toque efetivo → carteira + atribuição
                 sent += 1
                 _mark_contacted_in_carteira(db, company_id, None, profile)

@@ -165,6 +165,18 @@ def _parse_dates_multi_format(df: pl.DataFrame) -> pl.DataFrame:
     attempts = [pl.col("date").str.to_date(fmt, strict=False) for fmt in _DATE_FORMATS]
     df = df.with_columns(pl.coalesce(attempts).alias("date"))
 
+    # Guard de ano plausível: "26-06-25" casa %d-%m-%Y com o ano "25" → ano 0025,
+    # passa os demais checks e joga TODO cliente pra "churned" (recência ~730k dias).
+    # Datas com ano fora de [1990, ano_atual+1] viram null → entram na contagem de
+    # perda e abortam se passarem do limiar, em vez de corromper em silêncio.
+    _year = pl.col("date").dt.year()
+    df = df.with_columns(
+        pl.when((_year >= 1990) & (_year <= date.today().year + 1))
+        .then(pl.col("date"))
+        .otherwise(None)
+        .alias("date")
+    )
+
     nulls = df["date"].null_count()
     loss = nulls / total
     if loss > _DATE_NULL_THRESHOLD:
@@ -900,9 +912,11 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str, cycle_days: int
             "recoveryBand": rs["recoveryBand"],
             "recoveryReasons": rs["recoveryReasons"],
             "priorityValue": priority_value,
-            "_sort": st["expected_value"],
+            "_sort": priority_value,
         })
-    # Ordena por valor recuperável desc (não por valor_total bruto)
+    # Ordena por valor de PRIORIDADE (recuperável × chance de recuperar), não por
+    # expected_value bruto — evita jogar lead pouco recuperável (score baixo) pro
+    # topo da fila só porque a receita é alta.
     opportunities.sort(key=lambda o: o["_sort"], reverse=True)
     opportunities = opportunities[:15]
     for o in opportunities:
@@ -911,7 +925,12 @@ def generate_dynamic_insights(df: pl.DataFrame, date_range: str, cycle_days: int
     # KPI lostRevenue: soma do valor recuperável dos clientes churned (histórico completo),
     # não a receita do período. timeSeries.perdida (abaixo) segue por período.
     lost_revenue = round(lost_revenue, 2)
-    lost_rate = round((lost_revenue / total_revenue) * 100, 1) if total_revenue > 0 else 0.0
+    # lostRate como fração da RECEITA ENDEREÇÁVEL (retida no período + perdida), não
+    # da receita do período sozinha — senão o numerador (perda vitalícia) estoura 100%
+    # em janelas curtas (chegava a 351% em 1m). Assim fica sempre em [0,100] e diminui
+    # conforme a janela cresce (mais receita retida no denominador).
+    _lost_base = total_revenue + lost_revenue
+    lost_rate = round((lost_revenue / _lost_base) * 100, 1) if _lost_base > 0 else 0.0
 
     # ── Customer distribution ─────────────────────────────────────────────────
     cust_curr = df_current.group_by("customer_id").agg(pl.col("revenue").sum().alias("curr"))

@@ -36,6 +36,14 @@ backend/*_vendas_erp*.csv
 backend/ingest_buffer_*.csv
 narrativa.csv
 
+# ── Dados de teste soltos na raiz (uploads manuais, planilhas, etc.) ──────────
+/*.csv
+/*.xlsx
+/*.xls
+/*.docx
+/*.doc
+/*.pdf
+
 # ── Markdown (documentação interna — não versionar) ───────────────────────────
 *.md
 # Exports LGPD/GDPR (PII) — nunca versionar
